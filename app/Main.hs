@@ -1,11 +1,15 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
 module Main where
 
 import Lib
 import Text.ParserCombinators.Parsec
 import Text.Parsec.Combinator
 import System.IO
-
+import System.Console.Haskeline
+import Control.Monad.Trans.Class
+import Control.Lens
 
 type Identifier = String
 
@@ -15,7 +19,17 @@ data TokenType = TokenTypePlus |
                  TokenTypeMultiply | 
                  TokenTypeIdent Identifier | 
                  TokenTypeSymbol String | 
+                 TokenTypeLet |
+                 TokenTypeCase |
+                 TokenTypeDefine |
+                 TokenTypeLambda |
+                 TokenTypeThinArrow |
+                 TokenTypeFatArrow |
+                 TokenTypeSemicolon |
+                 TokenTypeEquals | 
                  TokenTypeRawNumber String
+
+makePrisms ''TokenType
 
 instance Show TokenType where
   show TokenTypePlus = "+"
@@ -25,107 +39,146 @@ instance Show TokenType where
   show (TokenTypeIdent id)= "id-" ++ id
   show (TokenTypeRawNumber num) = "num-" ++ num
   show (TokenTypeSymbol sym) = "sym-" ++ sym
+  show TokenTypeLet = "let"
+  show TokenTypeCase = "case"
+  show TokenTypeDefine = "define"
+  show TokenTypeLambda = "\\"
+  show TokenTypeThinArrow = "->"
+  show TokenTypeFatArrow = "=>"
+  show TokenTypeEquals = "="
+  show TokenTypeSemicolon = ";"
 
+  
 data Trivia = Trivia {
-  sourcePos :: SourcePos
+  _triviaSourcePos :: SourcePos
 } deriving(Show)
 
+makeLenses ''Trivia
+
 data Token = Token {
-  tokenType :: TokenType,
-  tokenTrivia :: Trivia
+  _tokenType :: TokenType,
+  _tokenTrivia :: Trivia
 }
 
+makeLenses ''Token
+
 instance (Show Token) where
-  show (Token{..}) = show tokenType ++ "(" ++  show line ++ ":" ++ show col ++ ")" where
-                     line = sourceLine (sourcePos tokenTrivia)
-                     col = sourceColumn (sourcePos tokenTrivia)
+  show (Token{..}) = show _tokenType ++ "(" ++  show line ++ ":" ++ show col ++ ")" where
+                     line = _tokenTrivia ^. triviaSourcePos & sourceLine
+                     col =  _tokenTrivia ^. triviaSourcePos & sourceColumn
 
 
 data ExprNode = ExprNodeBinop(ExprNode, Token, ExprNode) |
-               ExprNodeFnApplication(ExprNode, ExprNode) deriving(Show)
+               ExprNodeFnApplication(ExprNode, ExprNode) |
+               ExprNodeIdent Identifier deriving(Show)
+
+
+makePrisms ''ExprNode
 
 
 data Binding = Binding {
-  bindingName :: Identifier,
-  bindingArgNames :: [Identifier],
-  bindingExpr :: ExprNode
+  _bindingName :: Identifier,
+  _bindingArgNames :: [Identifier],
+  _bindingExpr :: ExprNode
 } deriving(Show)
 
-identifierParser :: GenParser Char st Identifier
-identifierParser = do
+makeLenses ''Binding
+
+
+identfierTokenizer :: GenParser Char st Identifier
+identfierTokenizer = do
     c <- letter
     later <- many (alphaNum <|> oneOf ['_', '-', '?'])
     return $ c:later
 
-numberParser :: GenParser Char st TokenType
-numberParser = do
+numberTokenizer :: GenParser Char st TokenType
+numberTokenizer = do
   number_str <- many1 digit
   return $ TokenTypeRawNumber number_str
 
-keywordParser :: GenParser Char st TokenType
-keywordParser = do
-    name <- identifierParser
+keywordTokenizer :: GenParser Char st TokenType
+keywordTokenizer = do
+    name <- identfierTokenizer
     return $ TokenTypeIdent name
 
-symbolParser :: GenParser Char st TokenType
-symbolParser = do
-    symbol <- many1 (oneOf "!@#$%^&*()-=+/\\?<>.|")
-    return $ TokenTypeSymbol symbol
+makeSymbolTokenizer :: String -> TokenType -> GenParser Char st TokenType
+makeSymbolTokenizer str tokenType = fmap (const tokenType) (string str) 
 
-tokenParser :: GenParser Char st Token
-tokenParser = do
-  tokenType <- numberParser <|> keywordParser <|> symbolParser
+symbolTokenizer :: GenParser Char st TokenType
+symbolTokenizer = do
+    let lambda = makeSymbolTokenizer "\\" TokenTypeLambda
+    let thinArrow = makeSymbolTokenizer "->" TokenTypeThinArrow
+    let fatArrow = makeSymbolTokenizer "=>" TokenTypeFatArrow
+    let semicolon = makeSymbolTokenizer ";" TokenTypeSemicolon
+    let equals = makeSymbolTokenizer ";" TokenTypeEquals
+
+    lambda <|> thinArrow <|> fatArrow <|> semicolon <|> equals
+
+tokenizer :: GenParser Char st Token
+tokenizer = do
+  tokenType <- numberTokenizer <|> keywordTokenizer <|> symbolTokenizer
   sourcePos <- getPosition
   let trivia = Trivia sourcePos
   return $ Token tokenType trivia
 
-{-
--- [a-zA-Z](a-z | A-Z | 0-9 | _ | - | ?)*
-identifierParser :: GenParser Char st Identifier
-identifierParser = do
-    c <- letter
-    later <- many (alphaNum <|> oneOf ['_', '-', '?'])
-    return $ c:later
+tokenize :: [Char] -> Either ParseError [Token]
+tokenize input = parse (many (tokenizer <* spaces)) "tokenizer" input
 
-simplexParser :: GenParser Char st [Binding]
+
+
+simplexParser :: GenParser Token st [Binding]
 simplexParser = 
-    do result <- many (bindingParser <* spaces)
-       spaces
-       eof
+    do result <- many (bindingParser)
        return result
 
-tokenParser :: GenParser Char st Token
-tokenParser = tokenIdentParser <|> tokenSymbolParser
-
-exprParser :: GenParser Char st ExprNode
-exprParser = do
     
+istoken :: (TokenType -> Maybe a) -> GenParser Token st a
+istoken pred = tokenPrim show nextpos acceptor where
+  nextpos _ token _ = token ^. tokenTrivia . triviaSourcePos
+  acceptor token =  token ^. tokenType & pred
+                
+identifier :: GenParser Token st String
+identifier = istoken (\case
+                      TokenTypeIdent(ident) -> Just ident
+                      _ -> Nothing)
 
-bindingParser :: GenParser Char st Binding
+
+exprParser :: GenParser Token st ExprNode
+exprParser = do
+  return $ ExprNodeIdent "a"
+
+bindingParser :: GenParser Token st Binding
 bindingParser = do
-  name <- identifierParser
-  skipMany1 spaces
-  args <- many (identifierParser <* spaces)
-  spaces
+  istoken (^? _TokenTypeDefine)
+  name <- identifier
+  args <- many identifier
+  istoken (^? _TokenTypeEquals)
   expr <- exprParser
-
   return $ Binding name args expr
 
 
 type Program = [Binding]
 
-parseSimplex :: String -> Either ParseError [Program]
-parseSimplex input = parse csvFile "(unknown)" input
--}
+programParser :: GenParser Token st Program
+programParser = many bindingParser
+
+parseSimplex :: [Token] -> Either ParseError Program
+parseSimplex tokens = parse programParser "(unknown)" tokens
+
+
+repl :: InputT IO ()
+repl = do 
+    line <- getInputLine ">"
+    case line of
+        Nothing -> return ()
+        Just ("exit") -> return ()
+        Just ("quit") -> return ()
+        Just(line) -> do
+                        let tokens = tokenize line
+                        lift . print $ tokens
+                        -- let parsed = parseSimplex tokens 
+                        -- print parsed
+                        repl
 
 main :: IO ()
-main = do
-  putStr "\n>"
-  hFlush stdout
-  line <- getLine
-  if line == "exit"
-  then return ()
-  else do
-      let parsed = parse (many (tokenParser <* spaces)) "repl" line 
-      print parsed
-      main
+main = runInputT defaultSettings repl
