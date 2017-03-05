@@ -88,7 +88,7 @@ atomp :: StgParser Atom
 atomp = identp <|> numberp
     where
         identp = AtomIdentifier <$> identifierp
-        numberp = AtomNumber <$> rawNumberp
+        numberp = AtomRawNumber <$> rawNumberp
 
 
 -- Parse stuff inside braces, with commas on the inside

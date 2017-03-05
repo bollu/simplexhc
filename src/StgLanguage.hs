@@ -106,11 +106,11 @@ instance (Show Token) where
 
 
 
-data Atom = AtomNumber RawNumber | AtomIdentifier Identifier deriving(Show)
+data Atom = AtomRawNumber RawNumber | AtomIdentifier Identifier deriving(Show)
 makeLenses ''Atom
 
 instance Prettyable Atom where
-    mkDoc (AtomNumber n) = mkDoc n
+    mkDoc (AtomRawNumber n) = mkDoc n
     mkDoc (AtomIdentifier ident) = mkDoc ident
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |

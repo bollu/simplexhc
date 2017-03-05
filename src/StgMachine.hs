@@ -13,6 +13,8 @@ import Control.Applicative
 import Data.Either.Utils
 import Control.Monad.State
 import Control.Monad.Except
+-- readMaybe
+import Data.String.Utils
 
 data Continuation
 data UpdateFrame
@@ -67,7 +69,7 @@ data MachineState = MachineState {
 }
 makeLenses ''MachineState
 
-newtype MachineT a = MachineT { runMachineTa :: StateT MachineState (Either StgError) a }
+newtype MachineT a = MachineT { runMachineTa :: ExceptT StgError (State MachineState) a }
             deriving (Functor, Applicative, Monad
                , MonadState MachineState
                , MonadError StgError)
@@ -78,12 +80,13 @@ isMachineStateFinal m = False
 
 -- | All possible errors when interpreting STG code.
 data StgError = 
-        StgErrorLookupFailed Identifier LocalEnvironment GlobalEnvironment deriving (Show) -- ^ 'lookupVariable' failed
+        StgErrorLookupFailed Identifier LocalEnvironment GlobalEnvironment |
+        StgErrorUnableToMkPrimInt RawNumber deriving (Show) -- ^ 'lookupIdentifier' failed
 
 
 -- | Try to lookup 'Identifier' in the local & global environments. Fail if unable to lookup.
-lookupVariable :: LocalEnvironment -> Identifier -> MachineT Value
-lookupVariable localEnv ident = do
+lookupIdentifier :: LocalEnvironment -> Identifier -> MachineT Value
+lookupIdentifier localEnv ident = do
         globalEnv <- use globalEnvironment
 
         let localLookup = (localEnv ^. at ident)
@@ -91,6 +94,16 @@ lookupVariable localEnv ident = do
 
         let errormsg = StgErrorLookupFailed ident localEnv globalEnv
         maybeToEither errormsg (localLookup <|> globalLookup)
+
+
+rawNumberToValue :: RawNumber -> Either StgError Value
+rawNumberToValue raw = maybeToEither errormsg mval where
+    mval = raw ^. getRawNumber & maybeRead & (fmap ValuePrimInt)
+    errormsg = StgErrorUnableToMkPrimInt raw
+
+lookupAtom :: LocalEnvironment -> Atom -> MachineT Value
+lookupAtom localEnv (AtomRawNumber r) = MachineT $ ExceptT (state (\s -> (rawNumberToValue r, s)))
+lookupAtom localEnv (AtomIdentifier ident) = lookupIdentifier localEnv ident
 
 
 
@@ -109,6 +122,6 @@ stepCodeEval expr local = do
 
 
 stepEvalFnApplication :: Identifier -> [Atom] -> LocalEnvironment -> MachineT ()
-stepEvalFnApplication fn vars local = do
-     var <- (lookupVariable local) fn
+stepEvalFnApplication fnName vars local = do
+     var <- (lookupIdentifier local) fnName
      return ()

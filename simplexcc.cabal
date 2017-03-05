@@ -25,7 +25,8 @@ library
                        containers,
                        parsec,
                        MissingH,
-                       mtl
+                       mtl,
+                       pretty
 
   default-language:    Haskell2010
 
