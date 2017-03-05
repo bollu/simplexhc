@@ -47,8 +47,8 @@ symbolTokenizer = do
     let equals = makeSymbolTokenizer "=" TokenTypeEquals
     let openbrace = makeSymbolTokenizer "{" TokenTypeOpenBrace
     let closebrace = makeSymbolTokenizer "}" TokenTypeCloseBrace
-    let comma = makeSymbolTokenizer ")" TokenTypeCloseBrace
-    (thinArrow <|> fatArrow <|> equals <|> semicolon <|>openbrace <|> closebrace <|> comma)
+    let comma = makeSymbolTokenizer "," TokenTypeComma
+    (try thinArrow <|> try fatArrow <|> try equals <|> try semicolon <|> try openbrace <|> try closebrace <|> try comma)
     where
         makeSymbolTokenizer :: String -> TokenType -> StgTokenizer TokenType
         makeSymbolTokenizer str tokenType = fmap (const tokenType) (string str) 
@@ -90,13 +90,17 @@ atomp = identp <|> numberp
         identp = AtomIdentifier <$> identifierp
         numberp = AtomNumber <$> rawNumberp
 
+
+-- Parse stuff inside braces, with commas on the inside
+-- "{" <stuff> "}"
+bracesp :: StgParser a -> StgParser a
+bracesp = between (istoken (^? _TokenTypeOpenBrace)) (istoken (^? _TokenTypeCloseBrace))
+
 -- "{" atom1, atom2 .. atomn "}" | {}
 atomsp :: StgParser [Atom]
 atomsp = do
     let commap = istoken (^? _TokenTypeComma)
-    istoken (^? _TokenTypeOpenBrace)
-    atoms <- sepBy atomp  commap
-    istoken (^? _TokenTypeCloseBrace)
+    atoms <- bracesp (sepEndBy atomp  commap)
     return atoms
 
 -- Function application: fn_name "{" atom1 "," atom2 ... "}" | {}
@@ -115,9 +119,7 @@ exprp = applicationp
 identifierListp ::StgParser [Identifier]
 identifierListp = do
     let commap = istoken (^? _TokenTypeComma)
-    istoken (^? _TokenTypeOpenBrace)
-    idents <- sepBy identifierp  commap
-    istoken (^? _TokenTypeCloseBrace)
+    idents <- bracesp (sepEndBy identifierp  commap)
     return idents
 
 
