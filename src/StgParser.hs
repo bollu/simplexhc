@@ -6,6 +6,7 @@ import StgLanguage
 import Text.ParserCombinators.Parsec
 import Text.Parsec.Combinator
 import Control.Lens
+import Control.Monad.Error.Hoist
 
 type StgTokenizer a = GenParser Char () a 
 type StgParser a = GenParser Token () a

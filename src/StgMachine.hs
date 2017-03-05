@@ -13,6 +13,12 @@ import Control.Applicative
 import Data.Either.Utils
 import Control.Monad.State
 import Control.Monad.Except
+import Data.Traversable
+
+
+-- hoistError
+import Control.Monad.Error.Hoist
+
 -- readMaybe
 import Data.String.Utils
 
@@ -80,8 +86,12 @@ isMachineStateFinal m = False
 
 -- | All possible errors when interpreting STG code.
 data StgError = 
-        StgErrorLookupFailed Identifier LocalEnvironment GlobalEnvironment |
-        StgErrorUnableToMkPrimInt RawNumber deriving (Show) -- ^ 'lookupIdentifier' failed
+        -- | 'lookupIdentifier' failed
+        StgErrorLookupFailed Identifier LocalEnvironment GlobalEnvironment | 
+        -- | 'rawNumberToValue' failed
+        StgErrorUnableToMkPrimInt RawNumber  | 
+        -- | 'valueToAddr' failed
+        StgErrorUnableToMkAddrFromValue Value deriving (Show)
 
 
 -- | Try to lookup 'Identifier' in the local & global environments. Fail if unable to lookup.
@@ -102,26 +112,32 @@ rawNumberToValue raw = maybeToEither errormsg mval where
     errormsg = StgErrorUnableToMkPrimInt raw
 
 lookupAtom :: LocalEnvironment -> Atom -> MachineT Value
-lookupAtom localEnv (AtomRawNumber r) = MachineT $ ExceptT (state (\s -> (rawNumberToValue r, s)))
+lookupAtom _ (AtomRawNumber r) = hoistError id (rawNumberToValue r)
 lookupAtom localEnv (AtomIdentifier ident) = lookupIdentifier localEnv ident
 
+
+valueToAddr :: Value -> MachineT Addr
+valueToAddr (ValueAddr addr) = return addr
+valueToAddr (val @(ValuePrimInt i)) = throwError (StgErrorUnableToMkAddrFromValue val)
 
 
 stepMachine :: MachineT ()
 stepMachine = do
     code <- use code
     case code of
-        CodeEval f local -> stepCodeEval f local
+        CodeEval f local -> stepCodeEval local f
 
 
 -- | 'CodeEval' execution
-stepCodeEval :: ExprNode -> LocalEnvironment -> MachineT ()
-stepCodeEval expr local = do
+stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT ()
+stepCodeEval local expr = do
     case expr of
-        ExprNodeFnApplication f xs -> stepEvalFnApplication f xs local 
+        ExprNodeFnApplication f xs -> stepEvalFnApplication local f xs  
 
 
-stepEvalFnApplication :: Identifier -> [Atom] -> LocalEnvironment -> MachineT ()
-stepEvalFnApplication fnName vars local = do
-     var <- (lookupIdentifier local) fnName
+stepEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT ()
+stepEvalFnApplication local fnName vars = do
+     fnAddr <- lookupIdentifier local fnName >>= valueToAddr
+     localVals <- for vars (lookupAtom local)
+
      return ()
