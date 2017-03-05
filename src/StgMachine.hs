@@ -15,6 +15,8 @@ import Control.Monad.State
 import Control.Monad.Except
 import Data.Traversable
 
+-- for <>
+import Data.Monoid
 
 -- hoistError
 import Control.Monad.Error.Hoist
@@ -139,5 +141,8 @@ stepEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT ()
 stepEvalFnApplication local fnName vars = do
      fnAddr <- lookupIdentifier local fnName >>= valueToAddr
      localVals <- for vars (lookupAtom local)
+     argumentStack <>= localVals
+     code .= CodeEnter fnAddr
+
 
      return ()
