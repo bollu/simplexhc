@@ -45,6 +45,8 @@ data TokenType = TokenTypePlus |
                  TokenTypeMultiply | 
                  TokenTypeIdentifier Identifier | 
                  TokenTypeLet |
+                 TokenTypeLetrec |
+                 TokenTypeIn |
                  TokenTypeCase |
                  TokenTypeDefine |
                  TokenTypeUpdate Bool | -- true: should update, false: no update
@@ -67,6 +69,8 @@ instance Show TokenType where
   show (TokenTypeIdentifier ident)= show ident
   show (TokenTypeRawNumber num) = show num
   show TokenTypeLet = "let"
+  show TokenTypeLetrec = "letrec"
+  show TokenTypeIn = "in"
   show TokenTypeCase = "case"
   show TokenTypeDefine = "define"
   show (TokenTypeUpdate b) = "\\" ++ (if b then "u" else "n")
@@ -113,8 +117,12 @@ instance Prettyable Atom where
     mkDoc (AtomRawNumber n) = mkDoc n
     mkDoc (AtomIdentifier ident) = mkDoc ident
 
+data IsLetRecursive = RecusriveLet | NonRecursiveLet deriving(Show)
+
+
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
                ExprNodeFnApplication Identifier [Atom]
+               ExprNodeLet IsLetRecursive [Binding] ExprNode
 
 makePrisms ''ExprNode
 
@@ -134,8 +142,8 @@ instance Show ExprNode where
 
 data Lambda = Lambda {
     _lambdaShouldUpdate :: Bool,
-    _lambdaFreeVariables :: [Identifier],
-    _lambdaBoundVariables :: [Identifier],
+    _lambdaFreeVarIdentifiers :: [Identifier],
+    _lambdaBoundVarIdentifiers :: [Identifier],
     _lambdaExprNode :: ExprNode
 } 
 
@@ -147,8 +155,8 @@ instance Prettyable Lambda where
         freedoc <+> updatedoc <+>
         bounddoc <+> text "->" $$
         (mkDoc _lambdaExprNode & mkNest) where
-            freedoc = (map mkDoc _lambdaFreeVariables) & punctuate comma & hsep & braces
-            bounddoc = (map mkDoc _lambdaBoundVariables) & punctuate comma & hsep & braces
+            freedoc = (map mkDoc _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
+            bounddoc = (map mkDoc _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
             updatedoc = PP.char '\\' <> (if _lambdaShouldUpdate then PP.char 'u' else PP.char 'n')
 
 instance Show Lambda where

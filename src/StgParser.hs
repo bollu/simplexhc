@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE LambdaCase #-}
 
 module StgParser where
 import StgLanguage
@@ -27,6 +28,9 @@ alphanumericTokenizer = do
     ident <- identfierTokenizer
     return $ case ident ^. getIdentifier of
                 "define" -> TokenTypeDefine
+                "let" -> TokenTypeLet
+                "letrec" -> TokenTypeLetrec
+                "in" -> TokenTypeIn
                 _ -> TokenTypeIdentifier ident
 
 updatetokenizer :: StgTokenizer TokenType
@@ -40,8 +44,8 @@ updatetokenizer = do
 
 
 
-symbolTokenizer :: StgTokenizer TokenType
-symbolTokenizer = do
+glyphTokenizer :: StgTokenizer TokenType
+glyphTokenizer = do
     let thinArrow = makeSymbolTokenizer "->" TokenTypeThinArrow
     let fatArrow = makeSymbolTokenizer "=>" TokenTypeFatArrow
     let semicolon = makeSymbolTokenizer ";" TokenTypeSemicolon
@@ -57,7 +61,7 @@ symbolTokenizer = do
 
 tokenizer :: StgTokenizer Token
 tokenizer = do
-  tokenType <- numberTokenizer <|> alphanumericTokenizer <|> symbolTokenizer <|> updatetokenizer
+  tokenType <- numberTokenizer <|> alphanumericTokenizer <|> glyphTokenizer <|> updatetokenizer
   sourcePos <- getPosition
   let trivia = Trivia sourcePos
   return $ Token tokenType trivia
@@ -111,9 +115,21 @@ applicationp = do
         atoms <- atomsp
         return $ ExprNodeFnApplication fn_name atoms
 
+-- let(rec) parser: ("let" | "letrec") <binding>+ "in" <expr>
+letp = 
+  let semicolonp = istoken (^? TokenTypeSemicolon)
+  isLetRecursive <- istoken (\case t of
+                                    TokenTypeLet -> Just NonRecursiveLet
+                                    TokenTypeLetrec -> Just RecursiveLet
+                                    _ -> Nothing)
+  bindings <- sepEndBy bindingp semicolonp
+  istoken (^? TokenTypeIn)
+
+
+
 -- Expression
 exprp :: StgParser ExprNode
-exprp = applicationp
+exprp = try applicationp <|>  try letp
 
 
 -- Identifier list: {" id1 "," id2 "," .. idn "} | "{}"
@@ -136,15 +152,15 @@ lambdap = do
     rhs <- exprp
     return Lambda {
         _lambdaShouldUpdate = shouldUpdate,
-        _lambdaFreeVariables = freeVars,
-        _lambdaBoundVariables = boundVars,
+        _lambdaFreeVarIdentifiers = freeVars,
+        _lambdaBoundVarIdentifiers = boundVars,
         _lambdaExprNode = rhs
     }
 
 
 -- define <name> = <lambdaform>
-bindingParser :: StgParser Binding
-bindingParser = do
+bindingp :: StgParser Binding
+bindingp = do
   istoken (^? _TokenTypeDefine)
   name <- identifierp
   istoken (^? _TokenTypeEquals)
@@ -155,7 +171,7 @@ bindingParser = do
 type Program = [Binding]
 
 stgParser :: StgParser Program
-stgParser = (\x -> [x]) <$> bindingParser
+stgParser = (\x -> [x]) <$> bindingp
 
 parseStg :: [Token] -> Either ParseError Program
 parseStg tokens = parse stgParser "(unknown)" tokens
