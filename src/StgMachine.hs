@@ -30,10 +30,10 @@ data UpdateFrame
 
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
+makeLenses ''Addr
 
 instance Show Addr where
     show addr = "0x" ++ (addr ^. getAddr & (\x -> showHex x ""))
-
 
 data Value = ValueAddr Addr | ValuePrimInt Int
     deriving (Eq, Ord, Show)
@@ -81,8 +81,6 @@ newtype MachineT a = MachineT { runMachineTa :: ExceptT StgError (State MachineS
                , MonadError StgError)
 
 
-isMachineStateFinal :: MachineState -> Bool
-isMachineStateFinal m = False
 
 -- | All possible errors when interpreting STG code.
 data StgError = 
@@ -97,6 +95,15 @@ data StgError =
         -- | 'takeNArgs' failed
         StgErrorNotEnoughArgsOnStack Int ArgumentStack deriving (Show)
 
+
+makeLenses ''ClosureFreeVars
+makePrisms ''Value
+makeLenses ''Closure
+makeLenses ''Code
+makeLenses ''MachineState
+
+isMachineStateFinal :: MachineState -> Bool
+isMachineStateFinal m = False
 
 -- | Try to lookup 'Identifier' in the local & global environments. Fail if unable to lookup.
 lookupIdentifier :: LocalEnvironment -> Identifier -> MachineT Value
@@ -183,31 +190,27 @@ stepCodeEnter addr =
                 _closureLambda = Lambda {
                     _lambdaShouldUpdate = False
                 }
-            } -> stepCodeEnterIntoNonupdatableClosure lambda freeVars
+            } -> stepCodeEnterIntoNonupdatableClosure closure
             other -> undefined -- $ "cannot handle closure like: " ++ (show other)
 
 
 -- provide the lambda and the list of free variables for binding
 stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT ()
 stepCodeEnterIntoNonupdatableClosure closure = do
-    let l = closure ^. lambda
+    let l = closure ^. closureLambda
     let boundVarIdentifiers = l ^. lambdaBoundVarIdentifiers
     let freeVarIdentifiers = l ^. lambdaFreeVarIdentifiers
     let evalExpr =  l ^. lambdaExprNode
 
     boundVarVals <- boundVarIdentifiers & length & takeNArgs
     let localFreeVars = M.fromList (zip freeVarIdentifiers
-                                               freeVarVals)
-    let localBoundVars = M.fromList (zip boundVariableIdentifiers
+                                               (closure ^. closureFreeVars . getFreeVars))
+    let localBoundVars = M.fromList (zip boundVarIdentifiers
                                                 boundVarVals)
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
 
 
 
-makeLenses ''ClosureFreeVars
-makeLenses ''Addr
-makePrisms ''Value
-makeLenses ''Closure
-makeLenses ''Code
-makeLenses ''MachineState
+
+
