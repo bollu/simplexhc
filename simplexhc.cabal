@@ -29,6 +29,7 @@ library
                        pretty,
                        hoist-error
 
+
   default-language:    Haskell2010
 
 executable simplexhc

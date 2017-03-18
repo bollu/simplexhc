@@ -116,18 +116,21 @@ applicationp = do
         return $ ExprNodeFnApplication fn_name atoms
 
 -- let(rec) parser: ("let" | "letrec") <binding>+ "in" <expr>
-letp = 
-  let semicolonp = istoken (^? TokenTypeSemicolon)
-  isLetRecursive <- istoken (\case t of
+letp :: StgParser ExprNode
+letp = do
+  let semicolonp = istoken (^? _TokenTypeSemicolon)
+  isLetRecursive <- istoken (\case 
                                     TokenTypeLet -> Just NonRecursiveLet
                                     TokenTypeLetrec -> Just RecursiveLet
-                                    _ -> Nothing)
+                                    _ -> Nothing
+                                   )
   bindings <- sepEndBy bindingp semicolonp
-  istoken (^? TokenTypeIn)
+  istoken (^? _TokenTypeIn)
+  inExpr <- exprp
+  return $ ExprNodeLet isLetRecursive bindings inExpr
 
 
 
--- Expression
 exprp :: StgParser ExprNode
 exprp = try applicationp <|>  try letp
 

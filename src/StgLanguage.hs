@@ -59,7 +59,6 @@ data TokenType = TokenTypePlus |
                  TokenTypeEquals | 
                  TokenTypeRawNumber RawNumber
 
-makePrisms ''TokenType
 
 instance Show TokenType where
   show TokenTypePlus = "+"
@@ -97,7 +96,6 @@ data Token = Token {
   _tokenTrivia :: Trivia
 }
 
-makeLenses ''Token
 
 instance Prettyable Token where
     mkDoc (Token{..}) = (mkDoc _tokenType)  <+> lparen <> linedoc <> colon <> coldoc <> rparen
@@ -111,33 +109,24 @@ instance (Show Token) where
 
 
 data Atom = AtomRawNumber RawNumber | AtomIdentifier Identifier deriving(Show)
-makeLenses ''Atom
 
 instance Prettyable Atom where
     mkDoc (AtomRawNumber n) = mkDoc n
     mkDoc (AtomIdentifier ident) = mkDoc ident
 
-data IsLetRecursive = RecusriveLet | NonRecursiveLet deriving(Show)
+data Binding = Binding {
+  _bindingName :: Identifier,
+  _bindingLambda :: Lambda
+}
+
+data IsLetRecursive = RecursiveLet | NonRecursiveLet deriving(Show)
 
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
-               ExprNodeFnApplication Identifier [Atom]
+               ExprNodeFnApplication Identifier [Atom] |
                ExprNodeLet IsLetRecursive [Binding] ExprNode
 
-makePrisms ''ExprNode
 
-instance Prettyable ExprNode where
-    mkDoc  (ExprNodeFnApplication fnName atoms) =
-        (mkDoc fnName) <+>
-        (map mkDoc atoms & punctuate comma & hsep & braces)
-
-    mkDoc (ExprNodeBinop eleft tok eright) = (tok ^. tokenType ^. to mkDoc)  <+>
-                                             (mkDoc eleft & mkNest) <+>
-                                             (mkDoc eright & mkNest)
-
-
-instance Show ExprNode where
-    show = renderStyle showStyle . mkDoc
 
 
 data Lambda = Lambda {
@@ -147,7 +136,6 @@ data Lambda = Lambda {
     _lambdaExprNode :: ExprNode
 } 
 
-makeLenses ''Lambda
 
 
 instance Prettyable Lambda where
@@ -163,13 +151,27 @@ instance Show Lambda where
     show = renderStyle showStyle . mkDoc
 
 
-data Binding = Binding {
-  _bindingName :: Identifier,
-  _bindingLambda :: Lambda
-}
-
+makeLenses ''Token
 makeLenses ''Binding
- 
+makeLenses ''Lambda
+makePrisms ''ExprNode
+makeLenses ''Atom
+makePrisms ''TokenType
+
+
+instance Prettyable ExprNode where
+    mkDoc  (ExprNodeFnApplication fnName atoms) =
+        (mkDoc fnName) <+>
+        (map mkDoc atoms & punctuate comma & hsep & braces)
+
+    mkDoc (ExprNodeBinop eleft tok eright) = (tok ^. tokenType ^. to mkDoc)  <+>
+                                             (mkDoc eleft & mkNest) <+>
+                                             (mkDoc eright & mkNest)
+
+
+instance Show ExprNode where
+    show = renderStyle showStyle . mkDoc
+
 
 instance Prettyable Binding where
     mkDoc (Binding{..}) = (PP.text "define") <+>

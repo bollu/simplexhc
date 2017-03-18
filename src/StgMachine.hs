@@ -30,7 +30,6 @@ data UpdateFrame
 
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
-makeLenses ''Addr
 
 instance Show Addr where
     show addr = "0x" ++ (addr ^. getAddr & (\x -> showHex x ""))
@@ -38,7 +37,6 @@ instance Show Addr where
 
 data Value = ValueAddr Addr | ValuePrimInt Int
     deriving (Eq, Ord, Show)
-makePrisms ''Value
 
 -- | Stack of 'Value'
 type ArgumentStack = [Value]
@@ -53,13 +51,11 @@ type GlobalEnvironment = M.Map Identifier Addr
 
 -- | has bindings of free variables with a 'LambdaForm'
 newtype ClosureFreeVars = ClosureFreeVars { _getFreeVars :: [Value] } deriving(Show)
-makeLenses ''ClosureFreeVars
 data Closure = Closure { 
     _closureLambda :: Lambda,
     _closureFreeVars :: ClosureFreeVars
 } deriving (Show)
 
-makeLenses ''Closure
 
 data Constructor
 type LocalEnvironment = M.Map Identifier Value
@@ -68,7 +64,6 @@ data Code = CodeEval ExprNode LocalEnvironment |
             CodeReturnConstructor Constructor [Value] |
             CodeReturnInt Int
 
-makeLenses ''Code
 
 
 data MachineState = MachineState {
@@ -79,7 +74,6 @@ data MachineState = MachineState {
     _globalEnvironment :: GlobalEnvironment,
     _code :: Code
 }
-makeLenses ''MachineState
 
 newtype MachineT a = MachineT { runMachineTa :: ExceptT StgError (State MachineState) a }
             deriving (Functor, Applicative, Monad
@@ -164,8 +158,7 @@ stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT ()
 stepCodeEval local expr = do
     case expr of
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
-        ExprNodeLet 
-
+        ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet  isReucursive bindings inExpr
 
 stepCodeEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT ()
 stepCodeEvalFnApplication local fnName vars = do
@@ -177,7 +170,9 @@ stepCodeEvalFnApplication local fnName vars = do
 
      return ()
 
-stepCodeEvalLet
+stepCodeEvalLet :: IsLetRecursive -> [Binding] -> ExprNode -> MachineT ()
+stepCodeEvalLet isLetRecursive bindings inExpr = do 
+    return ()
 
 stepCodeEnter :: Addr -> MachineT ()
 stepCodeEnter addr = 
@@ -185,7 +180,7 @@ stepCodeEnter addr =
         closure <- lookupAddrInHeap addr
         case closure of
             Closure {
-                _lambda = Lambda {
+                _closureLambda = Lambda {
                     _lambdaShouldUpdate = False
                 }
             } -> stepCodeEnterIntoNonupdatableClosure lambda freeVars
@@ -209,3 +204,10 @@ stepCodeEnterIntoNonupdatableClosure closure = do
     code .= CodeEval evalExpr localEnv
 
 
+
+makeLenses ''ClosureFreeVars
+makeLenses ''Addr
+makePrisms ''Value
+makeLenses ''Closure
+makeLenses ''Code
+makeLenses ''MachineState
