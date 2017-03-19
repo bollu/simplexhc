@@ -57,7 +57,6 @@ data Closure = Closure {
 } deriving (Show)
 
 
-data Constructor
 type LocalEnvironment = M.Map Identifier Value
 data Code = CodeEval ExprNode LocalEnvironment | 
             CodeEnter Addr |

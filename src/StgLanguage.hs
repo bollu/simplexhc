@@ -48,6 +48,7 @@ data TokenType = TokenTypePlus |
                  TokenTypeLetrec |
                  TokenTypeIn |
                  TokenTypeCase |
+                 TokenTypeOf |
                  TokenTypeDefine |
                  TokenTypeUpdate Bool | -- true: should update, false: no update
                  TokenTypeThinArrow |
@@ -71,6 +72,7 @@ instance Show TokenType where
   show TokenTypeLetrec = "letrec"
   show TokenTypeIn = "in"
   show TokenTypeCase = "case"
+  show TokenTypeOf = "of"
   show TokenTypeDefine = "define"
   show (TokenTypeUpdate b) = "\\" ++ (if b then "u" else "n")
   show TokenTypeThinArrow = "->"
@@ -124,8 +126,15 @@ data IsLetRecursive = RecursiveLet | NonRecursiveLet deriving(Show)
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
                ExprNodeFnApplication Identifier [Atom] |
-               ExprNodeLet IsLetRecursive [Binding] ExprNode
+               ExprNodeLet IsLetRecursive [Binding] ExprNode |
+               ExprNodeCase ExprNode [CaseAlt]
 
+newtype Constructor = Constructor { getConstructor :: String } deriving (Eq, Show)
+data CaseAlt = CaseAlt {
+  _caseAltConstructor :: Constructor,
+  _caseAltVars :: [Identifier],
+  _caseAltExpr :: ExprNode
+}
 
 
 

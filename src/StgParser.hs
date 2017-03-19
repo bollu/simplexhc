@@ -29,6 +29,8 @@ alphanumericTokenizer = do
     return $ case ident ^. getIdentifier of
                 "define" -> TokenTypeDefine
                 "let" -> TokenTypeLet
+                "of" -> TokenTypeOf
+                "case" -> TokenTypeCase
                 "letrec" -> TokenTypeLetrec
                 "in" -> TokenTypeIn
                 _ -> TokenTypeIdentifier ident
@@ -131,8 +133,19 @@ letp = do
 
 
 
+altp :: StgParser CaseAlt
+altp = undefined
+
+casep :: StgParser ExprNode
+casep = do
+  istoken (^? _TokenTypeCase)
+  e <- exprp
+  istoken (^? _TokenTypeOf)
+  let semicolonp = istoken (^? _TokenTypeSemicolon)
+  alts <- sepEndBy altp semicolonp
+  return $ ExprNodeCase  e alts
 exprp :: StgParser ExprNode
-exprp = try applicationp <|>  try letp
+exprp = try applicationp <|>  try letp <|> try casep
 
 
 -- Identifier list: {" id1 "," id2 "," .. idn "} | "{}"

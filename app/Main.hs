@@ -7,6 +7,7 @@ import StgLanguage
 import StgParser
 
 import System.IO
+import System.Environment
 import System.Console.Haskeline
 import Control.Monad.Trans.Class
 import Control.Lens
@@ -27,4 +28,7 @@ repl = do
                         repl
 
 main :: IO ()
-main = runInputT defaultSettings repl
+main = do
+    args <- getArgs
+    print args
+    runInputT defaultSettings repl
