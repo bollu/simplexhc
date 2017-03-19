@@ -11,6 +11,8 @@ import System.Environment
 import System.Console.Haskeline
 import Control.Monad.Trans.Class
 import Control.Lens
+import Control.Exception
+import Control.Monad
 
 
 repl :: InputT IO ()
@@ -26,9 +28,24 @@ repl = do
                         let parsed = tokens >>= parseStg 
                         lift . print $ parsed
                         repl
+-- runFile :: String -> IO ()
+-- runFile fpath = do
+--     mraw <- (try $ Prelude.readFile fpath :: IO (Either SomeException String))
+--     case mraw of 
+--         Left err -> print err
+--         Right raw -> (tokenize >=> parse) raw
+--     return ()
+
+
+runFile :: String -> IO ()
+runFile fpath = do
+    raw <- Prelude.readFile fpath
+    let parsed = (tokenize >=> parseStg) raw
+    print parsed
 
 main :: IO ()
 main = do
     args <- getArgs
-    print args
-    runInputT defaultSettings repl
+    if null args
+        then runInputT defaultSettings repl
+        else runFile (head args)

@@ -98,6 +98,13 @@ atomp = identp <|> numberp
         numberp = AtomRawNumber <$> rawNumberp
 
 
+
+semicolonp :: StgParser ()
+semicolonp = istoken (^? _TokenTypeSemicolon)
+
+commap :: StgParser ()
+commap = istoken (^? _TokenTypeComma)
+
 -- Parse stuff inside braces, with commas on the inside
 -- "{" <stuff> "}"
 bracesp :: StgParser a -> StgParser a
@@ -106,7 +113,6 @@ bracesp = between (istoken (^? _TokenTypeOpenBrace)) (istoken (^? _TokenTypeClos
 -- "{" atom1, atom2 .. atomn "}" | {}
 atomsp :: StgParser [Atom]
 atomsp = do
-    let commap = istoken (^? _TokenTypeComma)
     atoms <- bracesp (sepEndBy atomp  commap)
     return atoms
 
@@ -120,7 +126,6 @@ applicationp = do
 -- let(rec) parser: ("let" | "letrec") <binding>+ "in" <expr>
 letp :: StgParser ExprNode
 letp = do
-  let semicolonp = istoken (^? _TokenTypeSemicolon)
   isLetRecursive <- istoken (\case 
                                     TokenTypeLet -> Just NonRecursiveLet
                                     TokenTypeLetrec -> Just RecursiveLet
@@ -141,7 +146,6 @@ casep = do
   istoken (^? _TokenTypeCase)
   e <- exprp
   istoken (^? _TokenTypeOf)
-  let semicolonp = istoken (^? _TokenTypeSemicolon)
   alts <- sepEndBy altp semicolonp
   return $ ExprNodeCase  e alts
 exprp :: StgParser ExprNode
@@ -151,7 +155,6 @@ exprp = try applicationp <|>  try letp <|> try casep
 -- Identifier list: {" id1 "," id2 "," .. idn "} | "{}"
 identifierListp ::StgParser [Identifier]
 identifierListp = do
-    let commap = istoken (^? _TokenTypeComma)
     idents <- bracesp (sepEndBy identifierp  commap)
     return idents
 
@@ -187,7 +190,7 @@ bindingp = do
 type Program = [Binding]
 
 stgParser :: StgParser Program
-stgParser = (\x -> [x]) <$> bindingp
+stgParser = sepEndBy bindingp semicolonp -- (\x -> [x]) <$> bindingp
 
 parseStg :: [Token] -> Either ParseError Program
 parseStg tokens = parse stgParser "(unknown)" tokens
