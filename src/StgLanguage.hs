@@ -121,7 +121,7 @@ data Binding = Binding {
   _bindingLambda :: Lambda
 }
 
-data IsLetRecursive = RecursiveLet | NonRecursiveLet deriving(Show)
+data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
@@ -150,7 +150,7 @@ data Lambda = Lambda {
 instance Prettyable Lambda where
     mkDoc (Lambda{..}) = 
         freedoc <+> updatedoc <+>
-        bounddoc <+> text "->" $$
+        bounddoc <+> text "->" <+>
         (mkDoc _lambdaExprNode & mkNest) where
             freedoc = (map mkDoc _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
             bounddoc = (map mkDoc _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
@@ -176,6 +176,13 @@ instance Prettyable ExprNode where
     mkDoc (ExprNodeBinop eleft tok eright) = (tok ^. tokenType ^. to mkDoc)  <+>
                                              (mkDoc eleft & mkNest) <+>
                                              (mkDoc eright & mkNest)
+    mkDoc (ExprNodeLet isrecursive bindings expr) = 
+          letname $$
+          mkNest bindingsstr $$ 
+          (text "in")  $$
+          (expr & mkDoc & mkNest) where
+                        letname = PP.text (if isrecursive == LetNonRecursive then "let" else "letrec")
+                        bindingsstr = map mkDoc bindings & vcat
 
 
 instance Show ExprNode where

@@ -1,0 +1,3 @@
+define main =  {} \n {} -> letrec 
+                            define x = {} \u {} -> f {}
+                           in f {};

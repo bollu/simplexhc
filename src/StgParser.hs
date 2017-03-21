@@ -28,9 +28,9 @@ alphanumericTokenizer = do
     ident <- identfierTokenizer
     return $ case ident ^. getIdentifier of
                 "define" -> TokenTypeDefine
-                "let" -> TokenTypeLet
                 "of" -> TokenTypeOf
                 "case" -> TokenTypeCase
+                "let" -> TokenTypeLet
                 "letrec" -> TokenTypeLetrec
                 "in" -> TokenTypeIn
                 _ -> TokenTypeIdentifier ident
@@ -127,8 +127,8 @@ applicationp = do
 letp :: StgParser ExprNode
 letp = do
   isLetRecursive <- istoken (\case 
-                                    TokenTypeLet -> Just NonRecursiveLet
-                                    TokenTypeLetrec -> Just RecursiveLet
+                                    TokenTypeLet -> Just LetNonRecursive
+                                    TokenTypeLetrec -> Just LetRecursive
                                     _ -> Nothing
                                    )
   bindings <- sepEndBy bindingp semicolonp
