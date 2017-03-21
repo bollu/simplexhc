@@ -150,7 +150,7 @@ data Lambda = Lambda {
 instance Prettyable Lambda where
     mkDoc (Lambda{..}) = 
         freedoc <+> updatedoc <+>
-        bounddoc <+> text "->" <+>
+        bounddoc <+> text "->" $$
         (mkDoc _lambdaExprNode & mkNest) where
             freedoc = (map mkDoc _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
             bounddoc = (map mkDoc _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
@@ -191,8 +191,8 @@ instance Show ExprNode where
 
 instance Prettyable Binding where
     mkDoc (Binding{..}) = (PP.text "define") <+>
-                         (mkDoc _bindingName) <+> equals $$
-                         (_bindingLambda & mkDoc & mkNest)
+                         (mkDoc _bindingName) <+> equals <+>
+                         (_bindingLambda & mkDoc)
 
 
 instance Show Binding where
