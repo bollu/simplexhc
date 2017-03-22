@@ -24,16 +24,16 @@ import Control.Monad.Error.Hoist
 -- readMaybe
 import Data.String.Utils
 
-data Continuation
+data Continuation = Continuation { continuationAlts :: [CaseAlt],
+                                   continuationEnv :: LocalEnvironment
+                                }
 data UpdateFrame
 
 
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
-makeLenses ''Addr
-
 instance Show Addr where
-    show addr = "0x" ++ (addr ^. getAddr & (\x -> showHex x ""))
+    show addr = "0x" ++ (addr & _getAddr & (\x -> showHex x ""))
 
 data Value = ValueAddr Addr | ValuePrimInt Int
     deriving (Eq, Ord, Show)
@@ -70,6 +70,7 @@ data MachineState = MachineState {
     _returnStack :: ReturnStack,
     _updateStack :: UpdateStack,
     _heap :: Heap,
+    _heapCount :: Int,
     _globalEnvironment :: GlobalEnvironment,
     _code :: Code
 }
@@ -100,6 +101,8 @@ makePrisms ''Value
 makeLenses ''Closure
 makeLenses ''Code
 makeLenses ''MachineState
+makeLenses ''Addr
+
 
 isMachineStateFinal :: MachineState -> Bool
 isMachineStateFinal m = False
@@ -130,6 +133,14 @@ valueToAddr :: Value -> MachineT Addr
 valueToAddr (ValueAddr addr) = return addr
 valueToAddr (val @(ValuePrimInt i)) = throwError (StgErrorUnableToMkAddrFromValue val)
 
+allocateOnHeap :: Closure -> MachineT Addr
+allocateOnHeap cls = do
+  count <- use heapCount
+  machineHeap <- use heap
+  heap %= (at (Addr count) .~ Just cls)
+  heapCount += 1
+  return (Addr count)
+  
 
 lookupAddrInHeap :: Addr -> MachineT Closure
 lookupAddrInHeap addr = do
@@ -164,7 +175,8 @@ stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT ()
 stepCodeEval local expr = do
     case expr of
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
-        ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet  isReucursive bindings inExpr
+        ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet local  isReucursive bindings inExpr
+        ExprNodeCase expr alts -> stepCodeEvalCase local expr alts
 
 stepCodeEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT ()
 stepCodeEvalFnApplication local fnName vars = do
@@ -176,9 +188,18 @@ stepCodeEvalFnApplication local fnName vars = do
 
      return ()
 
-stepCodeEvalLet :: IsLetRecursive -> [Binding] -> ExprNode -> MachineT ()
-stepCodeEvalLet isLetRecursive bindings inExpr = do 
-    return ()
+stepCodeEvalLet :: LocalEnvironment -> IsLetRecursive -> [Binding] -> ExprNode -> MachineT ()
+stepCodeEvalLet local isLetRecursive bindings inExpr = undefined
+
+returnStackPush :: Continuation -> MachineT ()
+returnStackPush cont = do
+  returnStack %= (\rs -> cont:rs)
+
+stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAlt] -> MachineT ()
+stepCodeEvalCase local expr alts = do
+  returnStackPush (Continuation alts local)
+  code .= CodeEval expr local
+
 
 stepCodeEnter :: Addr -> MachineT ()
 stepCodeEnter addr = 
@@ -208,8 +229,5 @@ stepCodeEnterIntoNonupdatableClosure closure = do
                                                 boundVarVals)
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
-
-
-
 
 
