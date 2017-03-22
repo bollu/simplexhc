@@ -15,13 +15,19 @@ type StgParser a = GenParser Token () a
 identfierTokenizer :: StgTokenizer Identifier
 identfierTokenizer = do
     c <- letter
-    later <- many (alphaNum <|> oneOf ['_', '-', '?'])
-    return $ Identifier (c:later)
+    rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
+    return $ Identifier (c:rest)
 
 numberTokenizer :: StgTokenizer TokenType
 numberTokenizer = do
   number_str <- many1 digit
   return $ TokenTypeRawNumber (RawNumber number_str)
+
+constructorTokenizer :: StgTokenizer TokenType
+constructorTokenizer = do
+  c <- upper
+  rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
+  return $ TokenTypeConstructorName (ConstructorName (c:rest))
 
 alphanumericTokenizer :: StgTokenizer TokenType
 alphanumericTokenizer = do
@@ -63,7 +69,7 @@ glyphTokenizer = do
 
 tokenizer :: StgTokenizer Token
 tokenizer = do
-  tokenType <- numberTokenizer <|> alphanumericTokenizer <|> glyphTokenizer <|> updatetokenizer
+  tokenType <- numberTokenizer <|> constructorTokenizer <|> alphanumericTokenizer <|> glyphTokenizer <|> updatetokenizer
   sourcePos <- getPosition
   let trivia = Trivia sourcePos
   return $ Token tokenType trivia
@@ -123,6 +129,9 @@ applicationp = do
         atoms <- atomsp
         return $ ExprNodeFnApplication fn_name atoms
 
+rawnumberp :: StgParser ExprNode
+rawnumberp = ExprNodeRawNumber <$> (istoken (^? _TokenTypeRawNumber))
+
 -- let(rec) parser: ("let" | "letrec") <binding>+ "in" <expr>
 letp :: StgParser ExprNode
 letp = do
@@ -138,18 +147,46 @@ letp = do
 
 
 
-altp :: StgParser CaseAlt
-altp = undefined
+caseConstructorAltp :: StgParser CaseAltVariant
+caseConstructorAltp = do
+  consname <- istoken (^? _TokenTypeConstructorName)  
+  consparams <- many identifierp
+  istoken (^? _TokenTypeThinArrow)
+  rhs <- exprp
+  return $ CaseAltConstructor (CaseAlt (consname, consparams) rhs)
 
-casep :: StgParser ExprNode
-casep = do
+  
+
+caseConstructorp :: StgParser ExprNode
+caseConstructorp = do
   istoken (^? _TokenTypeCase)
   e <- exprp
   istoken (^? _TokenTypeOf)
-  alts <- sepEndBy altp semicolonp
-  return $ ExprNodeCase  e alts
+  alts <- sepEndBy caseConstructorAltp semicolonp
+  return $ ExprNodeCase e alts
+
+
+caseRawNumberAltp :: StgParser CaseAltVariant
+caseRawNumberAltp = do
+  num <- istoken (^? _TokenTypeRawNumber)
+  istoken (^? _TokenTypeThinArrow)
+  rhs <- exprp
+  return $ CaseAltRawNumber (CaseAlt num rhs)
+
+caseRawNumberp :: StgParser ExprNode
+caseRawNumberp = do
+  istoken (^? _TokenTypeCase)
+  num <- rawnumberp
+  istoken (^? _TokenTypeOf)
+  alts <- sepEndBy caseRawNumberAltp semicolonp
+  return $ ExprNodeCase num alts
+
 exprp :: StgParser ExprNode
-exprp = try applicationp <|>  try letp <|> try casep
+exprp = try applicationp <|>
+        try letp <|>
+        try caseConstructorp <|>
+        try caseRawNumberp <|>
+        try rawnumberp
 
 
 -- Identifier list: {" id1 "," id2 "," .. idn "} | "{}"

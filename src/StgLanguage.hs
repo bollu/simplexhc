@@ -20,6 +20,9 @@ mkNest = nest 4
 class Prettyable a where
     mkDoc :: a -> Doc
 
+newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq, Show)
+makeLenses ''ConstructorName
+
 newtype Identifier = Identifier { _getIdentifier :: String } deriving(Ord, Eq)
 makeLenses ''Identifier
 
@@ -44,6 +47,7 @@ data TokenType = TokenTypePlus |
                  TokenTypeDiv | 
                  TokenTypeMultiply | 
                  TokenTypeIdentifier Identifier | 
+                 TokenTypeConstructorName ConstructorName | 
                  TokenTypeLet |
                  TokenTypeLetrec |
                  TokenTypeIn |
@@ -66,7 +70,8 @@ instance Show TokenType where
   show TokenTypeMinus = "-"
   show TokenTypeDiv = "/"
   show TokenTypeMultiply = "*"
-  show (TokenTypeIdentifier ident)= show ident
+  show (TokenTypeIdentifier ident) = show ident
+  show (TokenTypeConstructorName name) = show name
   show (TokenTypeRawNumber num) = show num
   show TokenTypeLet = "let"
   show TokenTypeLetrec = "letrec"
@@ -123,18 +128,22 @@ data Binding = Binding {
 
 data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
+type Constructor = (ConstructorName, [Identifier])
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
                ExprNodeFnApplication Identifier [Atom] |
                ExprNodeLet IsLetRecursive [Binding] ExprNode |
-               ExprNodeCase ExprNode [CaseAlt]
+               ExprNodeCase ExprNode [CaseAltVariant] |
+               ExprNodeRawNumber RawNumber
+      
 
-newtype Constructor = Constructor { getConstructor :: String } deriving (Eq, Show)
-data CaseAlt = CaseAlt {
-  _caseAltConstructor :: Constructor,
-  _caseAltVars :: [Identifier],
+data CaseAlt lhs = CaseAlt {
+  _caseAltLHS :: lhs,
   _caseAltExpr :: ExprNode
 }
+
+data CaseAltVariant = CaseAltConstructor (CaseAlt Constructor) |
+                       CaseAltRawNumber (CaseAlt RawNumber)
 
 
 
@@ -184,6 +193,7 @@ instance Prettyable ExprNode where
                         letname = PP.text (if isrecursive == LetNonRecursive then "let" else "letrec")
                         bindingsstr = map mkDoc bindings & vcat
 
+    mkDoc (ExprNodeRawNumber number) = mkDoc number
 
 instance Show ExprNode where
     show = renderStyle showStyle . mkDoc

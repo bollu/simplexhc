@@ -24,7 +24,7 @@ import Control.Monad.Error.Hoist
 -- readMaybe
 import Data.String.Utils
 
-data Continuation = Continuation { continuationAlts :: [CaseAlt],
+data Continuation = Continuation { continuationAlts :: [CaseAltVariant],
                                    continuationEnv :: LocalEnvironment
                                 }
 data UpdateFrame
@@ -169,6 +169,7 @@ stepMachine = do
     case code of
         CodeEval f local -> stepCodeEval local f
         CodeEnter addr -> stepCodeEnter addr
+        CodeReturnInt i -> stepCodeReturnInt i
 
 -- | 'CodeEval' execution
 stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT ()
@@ -177,6 +178,7 @@ stepCodeEval local expr = do
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
         ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet local  isReucursive bindings inExpr
         ExprNodeCase expr alts -> stepCodeEvalCase local expr alts
+        ExprNodeRawNumber num -> stepCodeEvalRawNumber num
 
 stepCodeEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT ()
 stepCodeEvalFnApplication local fnName vars = do
@@ -195,12 +197,21 @@ returnStackPush :: Continuation -> MachineT ()
 returnStackPush cont = do
   returnStack %= (\rs -> cont:rs)
 
+returnStackPop :: MachineT Continuation
+returnStackPop = do
+   empty <- use (returnStack . to empty)
+   return undefined
+
 stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAlt] -> MachineT ()
 stepCodeEvalCase local expr alts = do
   returnStackPush (Continuation alts local)
   code .= CodeEval expr local
 
+stepCodeEvalRawNumber :: RawNumber -> MachineT ()
+stepCodeEvalRawNumber rawnum = do
+  code .= CodeReturnInt (rawnum ^. getRawNumber & read)
 
+-- | codeEnter execution
 stepCodeEnter :: Addr -> MachineT ()
 stepCodeEnter addr = 
     do
@@ -230,4 +241,9 @@ stepCodeEnterIntoNonupdatableClosure closure = do
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
 
+-- | codeReturnInt execution
+codeReturnInt :: Int -> MachineT ()
+codeReturnInt i = do
+  cont <- popContinuationStack 
+  
 
