@@ -20,9 +20,17 @@ mkNest = nest 4
 class Prettyable a where
     mkDoc :: a -> Doc
 
-newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq, Show)
+instance (Prettyable a, Prettyable b) => Prettyable (a, b) where
+  mkDoc (a, b) = text "( " PP.<>  mkDoc a PP.<> text ", " PP.<> mkDoc b PP.<> text ")"
+
+newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq)
 makeLenses ''ConstructorName
 
+instance Show ConstructorName where
+  show cons = _getConstructorName cons
+
+instance Prettyable ConstructorName where
+    mkDoc = text . show
 newtype Identifier = Identifier { _getIdentifier :: String } deriving(Ord, Eq)
 makeLenses ''Identifier
 
@@ -128,7 +136,14 @@ data Binding = Binding {
 
 data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
-type Constructor = (ConstructorName, [Identifier])
+data Constructor = Constructor ConstructorName [Identifier]
+
+instance Prettyable Constructor where
+  mkDoc (Constructor name idents) = mkDoc name <+> (idents & map mkDoc & hsep)
+
+instance Show Constructor where
+  show = renderStyle showStyle . mkDoc
+
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
                ExprNodeFnApplication Identifier [Atom] |
@@ -142,14 +157,27 @@ data CaseAlt lhs = CaseAlt {
   _caseAltExpr :: ExprNode
 }
 
+
+instance Prettyable lhs => Prettyable (CaseAlt lhs) where
+  mkDoc CaseAlt{..} = mkDoc _caseAltLHS <+>
+                      text "->" <+>
+                      mkDoc _caseAltExpr
+
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
                       CaseAltConstructor (CaseAlt Constructor) |
                       -- | match with a number: 10 -> e
                       CaseAltRawNumber (CaseAlt RawNumber) |
                       -- | match with a variable: x -> e
-                      CaseAltVariable Identifier 
+                      CaseAltVariable (CaseAlt Identifier) 
 
+instance Prettyable CaseAltType where
+  mkDoc (CaseAltConstructor altCons) = 
+    mkDoc (_caseAltLHS altCons) <+>
+    text "->"  <+>
+    mkDoc (_caseAltExpr altCons) 
 
+  mkDoc (CaseAltRawNumber altRawNumber) = mkDoc altRawNumber
+  mkDoc (CaseAltVariable altIdentifier) = mkDoc altIdentifier
 
 data Lambda = Lambda {
     _lambdaShouldUpdate :: Bool,

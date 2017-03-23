@@ -153,7 +153,8 @@ caseConstructorAltp = do
   consparams <- many identifierp
   istoken (^? _TokenTypeThinArrow)
   rhs <- exprp
-  return $ CaseAltConstructor (CaseAlt (consname, consparams) rhs)
+  let constructor = Constructor consname consparams
+  return $ CaseAltConstructor ((CaseAlt constructor) rhs)
 
   
 

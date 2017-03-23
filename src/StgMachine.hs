@@ -5,6 +5,7 @@
 module StgMachine where
 import StgLanguage
 
+import Text.PrettyPrint as PP
 import Numeric 
 import qualified Data.Map as M
 import Control.Monad.Trans.Class
@@ -27,16 +28,34 @@ import Data.String.Utils
 data Continuation = Continuation { _continuationAlts :: [CaseAltType],
                                    _continuationEnv :: LocalEnvironment
                                 }
+
+instance Prettyable Continuation where
+  mkDoc Continuation{..} = text "alts:" $$ 
+                           (_continuationAlts  & map mkDoc & vcat & mkNest)
 data UpdateFrame
+
+instance Prettyable UpdateFrame where
+  mkDoc _ = text "update-frame"
 
 
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
+instance Prettyable Addr where
+    mkDoc addr = text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))
+
 instance Show Addr where
-    show addr = "0x" ++ (addr & _getAddr & (\x -> showHex x ""))
+    show = renderStyle showStyle . mkDoc
 
 data Value = ValueAddr Addr | ValuePrimInt Int
-    deriving (Eq, Ord, Show)
+    deriving (Eq, Ord)
+
+
+instance Prettyable Value where
+  mkDoc (ValueAddr addr) = text "v-" PP.<> mkDoc addr
+  mkDoc (ValuePrimInt int) = text ("v-" ++ show int)
+
+instance Show Value where
+    show = renderStyle showStyle . mkDoc
 
 -- | Stack of 'Value'
 type ArgumentStack = [Value]
@@ -58,10 +77,25 @@ data Closure = Closure {
 
 
 type LocalEnvironment = M.Map Identifier Value
+
+instance (Prettyable k, Prettyable v) => Prettyable (M.Map k v) where
+  mkDoc m = vcat (fmap (uncurry mkKvDoc) (M.toList m)) where
+              mkKvDoc key val = mkDoc key <+> text "->" <+> mkDoc val
+
 data Code = CodeEval ExprNode LocalEnvironment | 
             CodeEnter Addr |
             CodeReturnConstructor Constructor [Value] |
-            CodeReturnInt Int
+            CodeReturnInt Int deriving(Show)
+
+instance Prettyable Code where
+  mkDoc (CodeEval expr env) = text "Eval" <+> mkDoc expr <+> mkDoc env
+  mkDoc (CodeEnter addr) = text "Enter" <+> mkDoc addr
+  mkDoc (CodeReturnConstructor cons values) = 
+    text "ReturnConstructor" <+> 
+    mkDoc cons <+> 
+    (values & map mkDoc & hsep)
+  mkDoc (CodeReturnInt i) = text "ReturnInt" <+> text (show i)
+
 
 
 
@@ -74,6 +108,22 @@ data MachineState = MachineState {
     _globalEnvironment :: GlobalEnvironment,
     _code :: Code
 }
+
+instance Prettyable MachineState where
+  mkDoc MachineState{..} = 
+   text "args:" <+> argsDoc $$
+   text "return:" <+> returnDoc $$
+   text "update:" <+> updateDoc $$
+   text "heap:" <+> heapDoc $$
+   text "env:" <+> globalEnvDoc $$
+   text "code:" <+> code where
+    argsDoc = _argumentStack & map mkDoc & hsep
+    returnDoc = _returnStack & map mkDoc & hsep
+    updateDoc = _updateStack & map mkDoc & hsep
+    heapDoc = _heap & text . show
+    globalEnvDoc = _globalEnvironment & text . show
+    code = _code & text . show
+
 
 newtype MachineT a = MachineT { runMachineTa :: ExceptT StgError (State MachineState) a }
             deriving (Functor, Applicative, Monad
@@ -97,7 +147,7 @@ data StgError =
         -- | 'continuationGetVariable' found no variable
         StgErrorCaseAltsHasNoVariable Continuation |
         -- | 'continuationGetVariable' found too many variables
-        StgErrorCaseAltsHasMoreThanOneVariable Continuation [Identifier] | 
+        StgErrorCaseAltsHasMoreThanOneVariable Continuation [CaseAlt Identifier] | 
         -- | 'caseAltsGetUniqueMatch' found overlapping patterns
         -- | FIXME: find a better repr for the CaseAlt. currently cumbersome
         StgErrorCaseAltsOverlappingPatterns | 
@@ -251,8 +301,8 @@ stepCodeEnterIntoNonupdatableClosure closure = do
 
 -- | Return the variable if the continuation contains an alternative
 -- for it. 
-continuationGetVariable :: Continuation -> Either StgError Identifier
-continuationGetVariable cont = 
+continuationGetVariableAlt :: Continuation -> Either StgError (CaseAlt Identifier)
+continuationGetVariableAlt cont = 
   let vars = cont ^.. continuationAlts . each . _CaseAltVariable
   in
     case vars of
