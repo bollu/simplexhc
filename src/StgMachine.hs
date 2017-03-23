@@ -24,7 +24,7 @@ import Control.Monad.Error.Hoist
 -- readMaybe
 import Data.String.Utils
 
-data Continuation = Continuation { continuationAlts :: [CaseAltVariant],
+data Continuation = Continuation { continuationAlts :: [CaseAltType],
                                    continuationEnv :: LocalEnvironment
                                 }
 data UpdateFrame
@@ -202,7 +202,7 @@ returnStackPop = do
    empty <- use (returnStack . to empty)
    return undefined
 
-stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAlt] -> MachineT ()
+stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAltType] -> MachineT ()
 stepCodeEvalCase local expr alts = do
   returnStackPush (Continuation alts local)
   code .= CodeEval expr local
@@ -241,9 +241,21 @@ stepCodeEnterIntoNonupdatableClosure closure = do
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
 
+continuationDoesContainInt :: Continuation -> Maybe Int
+continuationDoesContainInt c = c ^. continuationAlts . _CaseAltRawNumber 
+
+-- | Return the variable if the continuation contains an alternative
+-- for it. 
+continuationDoesContainVariable :: Continuation -> [Identifier]
+continuationDoesContainVariable cont = cont ^.. continuationAlt . each . _CaseAltVariable
+
+
 -- | codeReturnInt execution
 codeReturnInt :: Int -> MachineT ()
 codeReturnInt i = do
-  cont <- popContinuationStack 
+  cont <- popContinuationStack
+  return undefined
+  
+  
   
 

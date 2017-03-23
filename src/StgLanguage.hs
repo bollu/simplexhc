@@ -133,7 +133,7 @@ type Constructor = (ConstructorName, [Identifier])
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
                ExprNodeFnApplication Identifier [Atom] |
                ExprNodeLet IsLetRecursive [Binding] ExprNode |
-               ExprNodeCase ExprNode [CaseAltVariant] |
+               ExprNodeCase ExprNode [CaseAltType] |
                ExprNodeRawNumber RawNumber
       
 
@@ -142,8 +142,12 @@ data CaseAlt lhs = CaseAlt {
   _caseAltExpr :: ExprNode
 }
 
-data CaseAltVariant = CaseAltConstructor (CaseAlt Constructor) |
-                       CaseAltRawNumber (CaseAlt RawNumber)
+data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
+                      CaseAltConstructor (CaseAlt Constructor) |
+                      -- | match with a number: 10 -> e
+                      CaseAltRawNumber (CaseAlt RawNumber) |
+                      -- | match with a variable: x -> e
+                      CaseAltVariable Identifier 
 
 
 
@@ -175,6 +179,7 @@ makeLenses ''Lambda
 makePrisms ''ExprNode
 makeLenses ''Atom
 makePrisms ''TokenType
+makePrisms ''CaseAltType
 
 
 instance Prettyable ExprNode where

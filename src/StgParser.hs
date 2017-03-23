@@ -147,7 +147,7 @@ letp = do
 
 
 
-caseConstructorAltp :: StgParser CaseAltVariant
+caseConstructorAltp :: StgParser CaseAltType
 caseConstructorAltp = do
   consname <- istoken (^? _TokenTypeConstructorName)  
   consparams <- many identifierp
@@ -166,7 +166,7 @@ caseConstructorp = do
   return $ ExprNodeCase e alts
 
 
-caseRawNumberAltp :: StgParser CaseAltVariant
+caseRawNumberAltp :: StgParser CaseAltType
 caseRawNumberAltp = do
   num <- istoken (^? _TokenTypeRawNumber)
   istoken (^? _TokenTypeThinArrow)
