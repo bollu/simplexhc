@@ -24,8 +24,8 @@ import Control.Monad.Error.Hoist
 -- readMaybe
 import Data.String.Utils
 
-data Continuation = Continuation { continuationAlts :: [CaseAltType],
-                                   continuationEnv :: LocalEnvironment
+data Continuation = Continuation { _continuationAlts :: [CaseAltType],
+                                   _continuationEnv :: LocalEnvironment
                                 }
 data UpdateFrame
 
@@ -93,7 +93,16 @@ data StgError =
         -- | 'valueToAddr' failed
         StgErrorUnableToMkAddrFromValue Value |
         -- | 'takeNArgs' failed
-        StgErrorNotEnoughArgsOnStack Int ArgumentStack deriving (Show)
+        StgErrorNotEnoughArgsOnStack Int ArgumentStack |
+        -- | 'continuationGetVariable' found no variable
+        StgErrorCaseAltsHasNoVariable Continuation |
+        -- | 'continuationGetVariable' found too many variables
+        StgErrorCaseAltsHasMoreThanOneVariable Continuation [Identifier] | 
+        -- | 'caseAltsGetUniqueMatch' found overlapping patterns
+        -- | FIXME: find a better repr for the CaseAlt. currently cumbersome
+        StgErrorCaseAltsOverlappingPatterns | 
+        -- | `returnStackPop` finds no continuation to return to
+        StgErrorReturnStackEmpty
 
 
 makeLenses ''ClosureFreeVars
@@ -102,6 +111,7 @@ makeLenses ''Closure
 makeLenses ''Code
 makeLenses ''MachineState
 makeLenses ''Addr
+makeLenses ''Continuation
 
 
 isMachineStateFinal :: MachineState -> Bool
@@ -197,10 +207,7 @@ returnStackPush :: Continuation -> MachineT ()
 returnStackPush cont = do
   returnStack %= (\rs -> cont:rs)
 
-returnStackPop :: MachineT Continuation
-returnStackPop = do
-   empty <- use (returnStack . to empty)
-   return undefined
+
 
 stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAltType] -> MachineT ()
 stepCodeEvalCase local expr alts = do
@@ -241,19 +248,41 @@ stepCodeEnterIntoNonupdatableClosure closure = do
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
 
-continuationDoesContainInt :: Continuation -> Maybe Int
-continuationDoesContainInt c = c ^. continuationAlts . _CaseAltRawNumber 
 
 -- | Return the variable if the continuation contains an alternative
 -- for it. 
-continuationDoesContainVariable :: Continuation -> [Identifier]
-continuationDoesContainVariable cont = cont ^.. continuationAlt . each . _CaseAltVariable
+continuationGetVariable :: Continuation -> Either StgError Identifier
+continuationGetVariable cont = 
+  let vars = cont ^.. continuationAlts . each . _CaseAltVariable
+  in
+    case vars of
+      [] -> Left (StgErrorCaseAltsHasNoVariable cont)
+      [v] -> Right v
+      vs -> Left (StgErrorCaseAltsHasMoreThanOneVariable cont vs)
 
+caseAltsGetUniqueMatch :: Eq a => [CaseAlt a] -> a -> Maybe (Either StgError (CaseAlt a))
+caseAltsGetUniqueMatch pats val = 
+  let matches = pats ^.. each . filtered (\alt -> alt ^. caseAltLHS == val)
+  in
+    case matches of
+      [] -> Nothing
+      [alt] -> Just (Right alt)
+      alts -> Just (Left (StgErrorCaseAltsOverlappingPatterns))
+
+returnStackPop :: MachineT Continuation
+returnStackPop = do
+  isempty <- use (returnStack . to null)
+  if isempty
+  then
+    throwError StgErrorReturnStackEmpty
+  else do
+    top <- returnStack %%= (\(r:rs) -> (r, rs))
+    return top
 
 -- | codeReturnInt execution
-codeReturnInt :: Int -> MachineT ()
-codeReturnInt i = do
-  cont <- popContinuationStack
+stepCodeReturnInt :: Int -> MachineT ()
+stepCodeReturnInt i = do
+  cont <- returnStackPop
   return undefined
   
   

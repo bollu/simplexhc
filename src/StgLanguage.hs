@@ -176,8 +176,9 @@ instance Show Lambda where
 makeLenses ''Token
 makeLenses ''Binding
 makeLenses ''Lambda
-makePrisms ''ExprNode
+makeLenses ''CaseAlt
 makeLenses ''Atom
+makePrisms ''ExprNode
 makePrisms ''TokenType
 makePrisms ''CaseAltType
 
