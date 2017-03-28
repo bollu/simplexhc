@@ -225,7 +225,6 @@ bindingp = do
   return $ Binding name lambda
 
 
-type Program = [Binding]
 
 stgParser :: StgParser Program
 stgParser = sepEndBy bindingp semicolonp -- (\x -> [x]) <$> bindingp

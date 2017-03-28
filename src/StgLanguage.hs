@@ -133,8 +133,8 @@ data Binding = Binding {
   _bindingName :: Identifier,
   _bindingLambda :: Lambda
 }
+type Program = [Binding]
 
-data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
 data Constructor = Constructor ConstructorName [Identifier]
 
@@ -144,6 +144,7 @@ instance Prettyable Constructor where
 instance Show Constructor where
   show = renderStyle showStyle . mkDoc
 
+data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
 data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
                ExprNodeFnApplication Identifier [Atom] |

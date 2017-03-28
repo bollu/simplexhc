@@ -5,6 +5,7 @@ module Main where
 
 import StgLanguage
 import StgParser
+import StgMachine
 
 import System.IO
 import System.Environment
@@ -14,6 +15,15 @@ import Control.Lens
 import Control.Exception
 import Control.Monad
 
+
+                         
+
+runProgram :: Program -> ([MachineState], Maybe StgError)
+runProgram = undefined
+              
+
+traceStg ::  Program -> IO ()
+traceStg = undefined
 
 repl :: InputT IO ()
 repl = do 

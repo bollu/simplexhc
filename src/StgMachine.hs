@@ -1,20 +1,24 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 
 module StgMachine where
 import StgLanguage
+
 
 import Text.PrettyPrint as PP
 import Numeric 
 import qualified Data.Map as M
 import Control.Monad.Trans.Class
 import Control.Lens
+import Data.Map.Lens
 import Control.Applicative
 import Data.Either.Utils
 import Control.Monad.State
 import Control.Monad.Except
 import Data.Traversable
+import Data.Foldable
 
 -- for <>
 import Data.Monoid
@@ -64,7 +68,6 @@ type UpdateStack = [UpdateFrame]
 type Heap = M.Map Addr Closure
 
 
-
 -- | Maps identifiers to addresses of the closures
 type GlobalEnvironment = M.Map Identifier Addr
 
@@ -84,8 +87,9 @@ instance (Prettyable k, Prettyable v) => Prettyable (M.Map k v) where
 
 data Code = CodeEval ExprNode LocalEnvironment | 
             CodeEnter Addr |
+            CodeUninitialized |
             CodeReturnConstructor Constructor [Value] |
-            CodeReturnInt Int deriving(Show)
+            CodeReturnInt Int deriving(Show) 
 
 instance Prettyable Code where
   mkDoc (CodeEval expr env) = text "Eval" <+> mkDoc expr <+> mkDoc env
@@ -104,7 +108,6 @@ data MachineState = MachineState {
     _returnStack :: ReturnStack,
     _updateStack :: UpdateStack,
     _heap :: Heap,
-    _heapCount :: Int,
     _globalEnvironment :: GlobalEnvironment,
     _code :: Code
 }
@@ -125,7 +128,7 @@ instance Prettyable MachineState where
     code = _code & text . show
 
 
-newtype MachineT a = MachineT { runMachineTa :: ExceptT StgError (State MachineState) a }
+newtype MachineT a = MachineT { unMachineT :: ExceptT StgError (State MachineState) a }
             deriving (Functor, Applicative, Monad
                , MonadState MachineState
                , MonadError StgError)
@@ -134,6 +137,8 @@ newtype MachineT a = MachineT { runMachineTa :: ExceptT StgError (State MachineS
 
 -- | All possible errors when interpreting STG code.
 data StgError = 
+        -- | 'compileProgram' could not find main
+        StgErrorUnableToFindMain | 
         -- | 'lookupIdentifier' failed
         StgErrorEnvLookupFailed Identifier LocalEnvironment GlobalEnvironment | 
         -- | 'lookupAddrInHeap' failed
@@ -164,6 +169,43 @@ makeLenses ''Addr
 makeLenses ''Continuation
 
 
+-- runExceptT :: ExceptT e (State s) a -> State s (Either e a)
+
+uninitializedMachineState :: MachineState
+uninitializedMachineState = MachineState {
+    _argumentStack=[],
+    _returnStack = [],
+    _updateStack = [],
+    _heap=M.empty,
+    _globalEnvironment=M.empty,
+    _code=CodeUninitialized
+}
+
+compileProgram :: Program -> Either StgError MachineState
+compileProgram prog = let (mVal, machineState) = runState (runExceptT . unMachineT $ setupBindings) uninitializedMachineState
+  in
+  -- (mVal *> machineState) is too cryptic for my current taste
+  case mVal of
+    Left err -> Left err
+    Right _ -> Right machineState
+  where
+    setupBindings :: MachineT ()
+    setupBindings = do 
+      for_ prog allocateBinding
+      mainAddr <-  use globalEnvironment >>= (\x -> hoistError (const StgErrorUnableToFindMain) (x ^. at (Identifier "main"))) :: MachineT Addr
+      -- NOTE: this is different from STG paper. Does this even work?
+      code .= CodeEnter mainAddr
+    allocateBinding :: Binding -> MachineT ()
+    allocateBinding binding = do
+        let lambda = binding ^. bindingLambda
+        let name = binding ^. bindingName
+        -- FIXME: make local envirorment ReaderT? How does ReaderT interact with StateT?
+        -- FIXME: JIT the machine? :)
+        let localenv = M.empty  -- when machine starts, no local env.
+        addr <- (mkClosureFromLambda lambda localenv) >>= allocateOnHeap
+        globalEnvironment %= ((at name) .~ Just addr )
+
+
 isMachineStateFinal :: MachineState -> Bool
 isMachineStateFinal m = False
 
@@ -171,7 +213,6 @@ isMachineStateFinal m = False
 lookupIdentifier :: LocalEnvironment -> Identifier -> MachineT Value
 lookupIdentifier localEnv ident = do
         globalEnv <- use globalEnvironment
-
         let localLookup = (localEnv ^. at ident)
         let globalLookup = (ValueAddr <$> (globalEnv ^. at ident))
 
@@ -193,12 +234,23 @@ valueToAddr :: Value -> MachineT Addr
 valueToAddr (ValueAddr addr) = return addr
 valueToAddr (val @(ValuePrimInt i)) = throwError (StgErrorUnableToMkAddrFromValue val)
 
+
+
+
+mkClosureFromLambda :: Lambda -> LocalEnvironment -> MachineT Closure
+mkClosureFromLambda lambda localenv = 
+    do
+      freeVarVals <- for (lambda ^. lambdaFreeVarIdentifiers) (lookupIdentifier  localenv)
+      let cls = Closure {
+        _closureLambda = lambda,
+        _closureFreeVars = ClosureFreeVars (freeVarVals)
+      }
+      return cls
+
 allocateOnHeap :: Closure -> MachineT Addr
 allocateOnHeap cls = do
-  count <- use heapCount
-  machineHeap <- use heap
+  count <- use (heap . to (M.size))
   heap %= (at (Addr count) .~ Just cls)
-  heapCount += 1
   return (Addr count)
   
 
