@@ -70,7 +70,7 @@ runFile fpath = do
                                       errStr = case mErr of
                                                 Nothing -> "Success"
                                                 Just err -> show err
-                                      traceStr = intercalate "\n--\n" (fmap show trace) 
+                                      traceStr = intercalate "\n\n=====\n\n" (fmap show trace) 
                                     in
                                       putStrLn $ traceStr ++ "\n\n\nFinal:\n======\n" ++ errStr
 main :: IO ()

@@ -35,7 +35,7 @@ data Continuation = Continuation { _continuationAlts :: [CaseAltType],
 
 instance Prettyable Continuation where
   mkDoc Continuation{..} = text "alts:" $$ 
-                           (_continuationAlts  & map mkDoc & vcat & mkNest)
+                           (_continuationAlts  & map mkDoc & vcat)
 
 instance Show Continuation where
     show = renderStyle showStyle . mkDoc
@@ -60,8 +60,8 @@ data Value = ValueAddr Addr | ValuePrimInt Int
 
 
 instance Prettyable Value where
-  mkDoc (ValueAddr addr) = text "v-" PP.<> mkDoc addr
-  mkDoc (ValuePrimInt int) = text ("v-" ++ show int)
+  mkDoc (ValueAddr addr) = text "v:" PP.<> mkDoc addr
+  mkDoc (ValuePrimInt int) = text ("v:" ++ show int)
 
 instance Show Value where
     show = renderStyle showStyle . mkDoc
@@ -78,16 +78,21 @@ type GlobalEnvironment = M.Map Identifier Addr
 
 -- | has bindings of free variables with a 'LambdaForm'
 newtype ClosureFreeVars = ClosureFreeVars { _getFreeVars :: [Value] } deriving(Show)
+instance Prettyable ClosureFreeVars where
+  mkDoc freeVars = _getFreeVars freeVars & map mkDoc & punctuate (text ",") & hsep
 data Closure = Closure { 
     _closureLambda :: Lambda,
     _closureFreeVars :: ClosureFreeVars
 } deriving (Show)
 
+instance Prettyable Closure where
+  mkDoc (Closure{..}) = text "cls:<<" <+> mkDoc _closureLambda $$ text "|" <+> mkDoc  _closureFreeVars <+> text ">>"
+
 
 type LocalEnvironment = M.Map Identifier Value
 
 instance (Prettyable k, Prettyable v) => Prettyable (M.Map k v) where
-  mkDoc m = vcat (fmap (uncurry mkKvDoc) (M.toList m)) where
+  mkDoc m = (fmap (uncurry mkKvDoc) (M.toList m))  & punctuate (text ";") & vcat where
               mkKvDoc key val = mkDoc key <+> text "->" <+> mkDoc val
 
 data Code = CodeEval ExprNode LocalEnvironment | 
@@ -97,7 +102,7 @@ data Code = CodeEval ExprNode LocalEnvironment |
             CodeReturnInt Int deriving(Show) 
 
 instance Prettyable Code where
-  mkDoc (CodeEval expr env) = text "Eval" <+> mkDoc expr <+> mkDoc env
+  mkDoc (CodeEval expr env) = text "Eval" <+> braces (mkDoc expr) <+> text "|Local:" <+> braces(mkDoc env)
   mkDoc (CodeEnter addr) = text "Enter" <+> mkDoc addr
   mkDoc (CodeReturnConstructor cons values) = 
     text "ReturnConstructor" <+> 
@@ -117,20 +122,22 @@ data MachineState = MachineState {
     _code :: Code
 }
 
+
 instance Prettyable MachineState where
   mkDoc MachineState{..} = 
-   text "args:" <+> argsDoc $$
-   text "return:" <+> returnDoc $$
-   text "update:" <+> updateDoc $$
-   text "heap:" <+> heapDoc $$
-   text "env:" <+> globalEnvDoc $$
-   text "code:" <+> code where
+   text "*** code:" $$ code $+$
+   text "*** args:" $$ argsDoc $+$
+   text "*** return:" $$ returnDoc $+$
+   text "*** update:" $$ updateDoc $+$
+   text "*** heap:" $$ heapDoc $+$
+   text "*** env:" $$ globalEnvDoc $+$
+   text "---" where
     argsDoc = _argumentStack & map mkDoc & hsep
     returnDoc = _returnStack & map mkDoc & hsep
     updateDoc = _updateStack & map mkDoc & hsep
-    heapDoc = _heap & text . show
-    globalEnvDoc = _globalEnvironment & text . show
-    code = _code & text . show
+    heapDoc = _heap & mkDoc
+    globalEnvDoc = _globalEnvironment & mkDoc 
+    code = _code & mkDoc
 
 instance Show MachineState where
     show = renderStyle showStyle . mkDoc
@@ -206,7 +213,7 @@ compileProgram prog =  runMachineT setupBindings uninitializedMachineState
         -- FIXME: make local envirorment ReaderT? How does ReaderT interact with StateT?
         -- FIXME: JIT the machine? :)
         let localenv = M.empty  -- when machine starts, no local env.
-        addr <- (mkClosureFromLambda lambda localenv) >>= allocateOnHeap
+        addr <- (mkClosureFromLambda lambda localenv) >>= allocateClosureOnHeap
         globalEnvironment %= ((at name) .~ Just addr )
 
 isExprPrimitive :: ExprNode -> Bool
@@ -256,8 +263,8 @@ mkClosureFromLambda lambda localenv =
       }
       return cls
 
-allocateOnHeap :: Closure -> MachineT Addr
-allocateOnHeap cls = do
+allocateClosureOnHeap :: Closure -> MachineT Addr
+allocateClosureOnHeap cls = do
   count <- use (heap . to (M.size))
   heap %= (at (Addr count) .~ Just cls)
   return (Addr count)
@@ -270,8 +277,6 @@ lookupAddrInHeap addr = do
     let errormsg = StgErrorHeapLookupFailed addr machineHeap :: StgError
     let eclosure = (maybeToEither errormsg mclosure) :: Either StgError Closure
     hoistError id eclosure
-
-
 
 -- pop n values off the argument stack
 takeNArgs :: Int -> MachineT [Value]
@@ -311,8 +316,19 @@ stepCodeEvalFnApplication local fnName vars = do
 
      return ()
 
+
+
 stepCodeEvalLet :: LocalEnvironment -> IsLetRecursive -> [Binding] -> ExprNode -> MachineT ()
-stepCodeEvalLet local isLetRecursive bindings inExpr = undefined
+stepCodeEvalLet local isLetRecursive bindings inExpr = do
+  let lookupEnv = local
+  closureNameAddrMap <- for bindings  (\b -> do
+                                              cls <- mkClosureFromLambda(b ^. bindingLambda) lookupEnv
+                                              addr <- allocateClosureOnHeap cls
+                                              return (b ^. bindingName, addr)
+                                      )
+
+  let newlocal = foldl  (\local (name, addr) -> M.insert name (ValueAddr addr) local)  local closureNameAddrMap
+  code .= CodeEval inExpr newlocal
 
 returnStackPush :: Continuation -> MachineT ()
 returnStackPush cont = do

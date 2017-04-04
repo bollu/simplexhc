@@ -14,14 +14,14 @@ showStyle = PP.Style {
     ribbonsPerLine = 1.5
 }
 
-mkNest :: Doc -> Doc
-mkNest = nest 4
+-- mkNest :: Doc -> Doc
+-- mkNest = nest 4
 
 class Prettyable a where
     mkDoc :: a -> Doc
 
 instance (Prettyable a, Prettyable b) => Prettyable (a, b) where
-  mkDoc (a, b) = text "( " PP.<>  mkDoc a PP.<> text ", " PP.<> mkDoc b PP.<> text ")"
+  mkDoc (a, b) = braces (mkDoc a PP.<> comma PP.<> mkDoc b)
 
 newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq)
 makeLenses ''ConstructorName
@@ -35,7 +35,7 @@ newtype Identifier = Identifier { _getIdentifier :: String } deriving(Ord, Eq)
 makeLenses ''Identifier
 
 instance Show Identifier where
-  show ident = "id-" ++ (ident ^. getIdentifier) 
+  show ident = "id:" ++ (ident ^. getIdentifier) 
 
 instance Prettyable Identifier where
     mkDoc = text . show
@@ -45,7 +45,7 @@ makeLenses ''RawNumber
 
 
 instance Show RawNumber where
-  show rawnum = "num-" ++ (rawnum ^. getRawNumber)
+  show rawnum = "num:" ++ (rawnum ^. getRawNumber)
 
 instance Prettyable RawNumber where
     mkDoc = text . show
@@ -196,7 +196,7 @@ instance Prettyable Lambda where
     mkDoc (Lambda{..}) = 
         freedoc <+> updatedoc <+>
         bounddoc <+> text "->" $$
-        (mkDoc _lambdaExprNode & mkNest) where
+        (mkDoc _lambdaExprNode) where
             freedoc = (map mkDoc _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
             bounddoc = (map mkDoc _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
             updatedoc = PP.char '\\' <> (if _lambdaShouldUpdate then PP.char 'u' else PP.char 'n')
@@ -221,13 +221,13 @@ instance Prettyable ExprNode where
         (map mkDoc atoms & punctuate comma & hsep & braces)
 
     mkDoc (ExprNodeBinop eleft tok eright) = (tok ^. tokenType ^. to mkDoc)  <+>
-                                             (mkDoc eleft & mkNest) <+>
-                                             (mkDoc eright & mkNest)
+                                             (mkDoc eleft) <+>
+                                             (mkDoc eright)
     mkDoc (ExprNodeLet isrecursive bindings expr) = 
           letname $$
-          mkNest bindingsstr $$ 
+          bindingsstr $$ 
           (text "in")  $$
-          (expr & mkDoc & mkNest) where
+          (expr & mkDoc) where
                         letname = PP.text (if isrecursive == LetNonRecursive then "let" else "letrec")
                         bindingsstr = map mkDoc bindings & vcat
 
