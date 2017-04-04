@@ -60,8 +60,8 @@ data Value = ValueAddr Addr | ValuePrimInt Int
 
 
 instance Prettyable Value where
-  mkDoc (ValueAddr addr) = text "v:" PP.<> mkDoc addr
-  mkDoc (ValuePrimInt int) = text ("v:" ++ show int)
+  mkDoc (ValueAddr addr) = text "val:" PP.<> mkDoc addr
+  mkDoc (ValuePrimInt int) = text ("val:" ++ show int)
 
 instance Show Value where
     show = renderStyle showStyle . mkDoc

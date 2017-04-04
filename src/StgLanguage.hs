@@ -35,7 +35,7 @@ newtype Identifier = Identifier { _getIdentifier :: String } deriving(Ord, Eq)
 makeLenses ''Identifier
 
 instance Show Identifier where
-  show ident = "id:" ++ (ident ^. getIdentifier) 
+  show ident = "ident:" ++ (ident ^. getIdentifier) 
 
 instance Prettyable Identifier where
     mkDoc = text . show
