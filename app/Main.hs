@@ -15,12 +15,18 @@ import Control.Lens
 import Control.Exception
 import Control.Monad
 
+-- v intercalate
+import Data.List
 
                          
 
-runProgram :: Program -> ([MachineState], Maybe StgError)
-runProgram = undefined
-              
+genMachineTrace :: MachineState -> ([MachineState], Maybe StgError)
+genMachineTrace machineState = if isMachineStateFinal machineState then
+                                    ([machineState], Nothing)
+                                else 
+                                  case runMachineT stepMachine machineState of
+                                      Left err -> ([], Just err)
+                                      Right state -> let (trace, err) = genMachineTrace state in (machineState:trace, err)
 
 traceStg ::  Program -> IO ()
 traceStg = undefined
@@ -37,22 +43,36 @@ repl = do
                         lift . print $ tokens
                         let parsed = tokens >>= parseStg 
                         lift . print $ parsed
+                        let compiled = case parsed of 
+                                           Left err -> Nothing
+                                           Right program ->  Just (compileProgram program)
+                        let trace = (fmap . fmap) genMachineTrace compiled
+                        lift . print $ trace
                         repl
--- runFile :: String -> IO ()
--- runFile fpath = do
---     mraw <- (try $ Prelude.readFile fpath :: IO (Either SomeException String))
---     case mraw of 
---         Left err -> print err
---         Right raw -> (tokenize >=> parse) raw
---     return ()
-
 
 runFile :: String -> IO ()
 runFile fpath = do
     raw <- Prelude.readFile fpath
     let parsed = (tokenize >=> parseStg) raw
     print parsed
+    let compiled = case parsed of 
+                       Left err -> Nothing
+                       Right program ->  Just (compileProgram program)
 
+    putStrLn "trace:\n======\n"
+    let trace = (fmap . fmap) genMachineTrace compiled
+    case trace of
+          Nothing -> return ()
+          Just (Left compileErr) -> do  
+                                      putStrLn "compile error: "
+                                      putStrLn . show $ compileErr
+          Just (Right (trace, mErr)) -> let 
+                                      errStr = case mErr of
+                                                Nothing -> "Success"
+                                                Just err -> show err
+                                      traceStr = intercalate "\n--\n" (fmap show trace) 
+                                    in
+                                      putStrLn $ traceStr ++ "\n\n\nFinal:\n======\n" ++ errStr
 main :: IO ()
 main = do
     args <- getArgs

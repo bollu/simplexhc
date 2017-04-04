@@ -164,6 +164,9 @@ instance Prettyable lhs => Prettyable (CaseAlt lhs) where
                       text "->" <+>
                       mkDoc _caseAltExpr
 
+instance Prettyable lhs => Show (CaseAlt lhs) where
+    show = renderStyle showStyle . mkDoc
+
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
                       CaseAltConstructor (CaseAlt Constructor) |
                       -- | match with a number: 10 -> e

@@ -36,6 +36,11 @@ data Continuation = Continuation { _continuationAlts :: [CaseAltType],
 instance Prettyable Continuation where
   mkDoc Continuation{..} = text "alts:" $$ 
                            (_continuationAlts  & map mkDoc & vcat & mkNest)
+
+instance Show Continuation where
+    show = renderStyle showStyle . mkDoc
+
+
 data UpdateFrame
 
 instance Prettyable UpdateFrame where
@@ -127,13 +132,13 @@ instance Prettyable MachineState where
     globalEnvDoc = _globalEnvironment & text . show
     code = _code & text . show
 
+instance Show MachineState where
+    show = renderStyle showStyle . mkDoc
 
 newtype MachineT a = MachineT { unMachineT :: ExceptT StgError (State MachineState) a }
             deriving (Functor, Applicative, Monad
                , MonadState MachineState
                , MonadError StgError)
-
-
 
 -- | All possible errors when interpreting STG code.
 data StgError = 
@@ -157,8 +162,7 @@ data StgError =
         -- | FIXME: find a better repr for the CaseAlt. currently cumbersome
         StgErrorCaseAltsOverlappingPatterns | 
         -- | `returnStackPop` finds no continuation to return to
-        StgErrorReturnStackEmpty
-
+        StgErrorReturnStackEmpty deriving(Show)
 
 makeLenses ''ClosureFreeVars
 makePrisms ''Value
@@ -167,7 +171,6 @@ makeLenses ''Code
 makeLenses ''MachineState
 makeLenses ''Addr
 makeLenses ''Continuation
-
 
 -- runExceptT :: ExceptT e (State s) a -> State s (Either e a)
 
@@ -181,13 +184,14 @@ uninitializedMachineState = MachineState {
     _code=CodeUninitialized
 }
 
+runMachineT :: MachineT () -> MachineState -> Either StgError MachineState
+runMachineT machineT state = let (mVal, machineState) = runState (runExceptT . unMachineT $ machineT) state in
+                    case mVal of
+                      Left err -> Left err
+                      Right _ -> Right machineState
+
 compileProgram :: Program -> Either StgError MachineState
-compileProgram prog = let (mVal, machineState) = runState (runExceptT . unMachineT $ setupBindings) uninitializedMachineState
-  in
-  -- (mVal *> machineState) is too cryptic for my current taste
-  case mVal of
-    Left err -> Left err
-    Right _ -> Right machineState
+compileProgram prog =  runMachineT setupBindings uninitializedMachineState
   where
     setupBindings :: MachineT ()
     setupBindings = do 
@@ -205,9 +209,14 @@ compileProgram prog = let (mVal, machineState) = runState (runExceptT . unMachin
         addr <- (mkClosureFromLambda lambda localenv) >>= allocateOnHeap
         globalEnvironment %= ((at name) .~ Just addr )
 
+isExprPrimitive :: ExprNode -> Bool
+isExprPrimitive (ExprNodeRawNumber _) = True
+isExprPrimitive _ = False
 
 isMachineStateFinal :: MachineState -> Bool
-isMachineStateFinal m = False
+isMachineStateFinal m = case m ^. code of
+                          (CodeEval expr _) -> isExprPrimitive expr
+                          _ -> False
 
 -- | Try to lookup 'Identifier' in the local & global environments. Fail if unable to lookup.
 lookupIdentifier :: LocalEnvironment -> Identifier -> MachineT Value
