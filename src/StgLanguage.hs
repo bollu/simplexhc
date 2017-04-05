@@ -174,6 +174,8 @@ data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
                       -- | match with a variable: x -> e
                       CaseAltVariable (CaseAlt Identifier) 
 
+
+
 instance Prettyable CaseAltType where
   mkDoc (CaseAltConstructor altCons) = 
     mkDoc (_caseAltLHS altCons) <+>
@@ -182,6 +184,9 @@ instance Prettyable CaseAltType where
 
   mkDoc (CaseAltRawNumber altRawNumber) = mkDoc altRawNumber
   mkDoc (CaseAltVariable altIdentifier) = mkDoc altIdentifier
+
+instance Show CaseAltType where
+  show = renderStyle showStyle . mkDoc
 
 data Lambda = Lambda {
     _lambdaShouldUpdate :: Bool,

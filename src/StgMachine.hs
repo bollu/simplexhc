@@ -2,6 +2,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE Rank2Types #-}
 
 module StgMachine where
 import StgLanguage
@@ -169,7 +170,9 @@ data StgError =
         -- | FIXME: find a better repr for the CaseAlt. currently cumbersome
         StgErrorCaseAltsOverlappingPatterns | 
         -- | `returnStackPop` finds no continuation to return to
-        StgErrorReturnStackEmpty deriving(Show)
+        StgErrorReturnStackEmpty |
+        -- | `unwrapAlts` failed, unable to unwrap raw number
+        StgErrorExpectedCaseAltRawNumber CaseAltType deriving(Show)
 
 makeLenses ''ClosureFreeVars
 makePrisms ''Value
@@ -406,11 +409,23 @@ returnStackPop = do
     top <- returnStack %%= (\(r:rs) -> (r, rs))
     return top
 
+unwrapAlts :: [CaseAltType] -> Prism' CaseAltType a -> (CaseAltType -> StgError) -> MachineT [a]
+unwrapAlts [] p err = return []
+unwrapAlts (a:as) p err = case a ^? p of
+                      Just a -> do
+                                  as' <- unwrapAlts as p err
+                                  return $ (a:as')
+                      Nothing -> throwError (err a)
+
+
 -- | codeReturnInt execution
 stepCodeReturnInt :: Int -> MachineT ()
 stepCodeReturnInt i = do
   cont <- returnStackPop
-  return undefined
+  unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltRawNumber StgErrorExpectedCaseAltRawNumber
+  return ()
+ 
+  
   
   
   

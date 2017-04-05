@@ -78,9 +78,6 @@ tokenize :: [Char] -> Either ParseError [Token]
 tokenize input = parse (many (tokenizer <* spaces)) "tokenizer" input
 
 
-
-    
-
 -- Tokens lifted to parsers
 
 istoken :: (TokenType -> Maybe a) -> StgParser a
