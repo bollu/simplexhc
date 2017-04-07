@@ -143,6 +143,8 @@ instance Prettyable MachineState where
 instance Show MachineState where
     show = renderStyle showStyle . mkDoc
 
+data MachineProgress = MachineStepped | MachineHalted deriving(Show, Eq)
+
 newtype MachineT a = MachineT { unMachineT :: ExceptT StgError (State MachineState) a }
             deriving (Functor, Applicative, Monad
                , MonadState MachineState
@@ -158,8 +160,6 @@ data StgError =
         StgErrorHeapLookupFailed Addr Heap |
         -- | 'rawNumberToValue' failed
         StgErrorUnableToMkPrimInt RawNumber  | 
-        -- | 'valueToAddr' failed
-        StgErrorUnableToMkAddrFromValue Value |
         -- | 'takeNArgs' failed
         StgErrorNotEnoughArgsOnStack Int ArgumentStack |
         -- | 'continuationGetVariable' found no variable
@@ -194,14 +194,16 @@ uninitializedMachineState = MachineState {
     _code=CodeUninitialized
 }
 
-runMachineT :: MachineT () -> MachineState -> Either StgError MachineState
+runMachineT :: MachineT a -> MachineState -> Either StgError (a, MachineState)
 runMachineT machineT state = let (mVal, machineState) = runState (runExceptT . unMachineT $ machineT) state in
+                    -- TODO: refactor with fmap
                     case mVal of
                       Left err -> Left err
-                      Right _ -> Right machineState
+                      Right val -> Right (val, machineState)
 
 compileProgram :: Program -> Either StgError MachineState
-compileProgram prog =  runMachineT setupBindings uninitializedMachineState
+compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineState)
+
   where
     setupBindings :: MachineT ()
     setupBindings = do 
@@ -249,11 +251,6 @@ lookupAtom _ (AtomRawNumber r) = hoistError id (rawNumberToValue r)
 lookupAtom localEnv (AtomIdentifier ident) = lookupIdentifier localEnv ident
 
 
-valueToAddr :: Value -> MachineT Addr
-valueToAddr (ValueAddr addr) = return addr
-valueToAddr (val @(ValuePrimInt i)) = throwError (StgErrorUnableToMkAddrFromValue val)
-
-
 
 
 mkClosureFromLambda :: Lambda -> LocalEnvironment -> MachineT Closure
@@ -292,7 +289,8 @@ takeNArgs n = do
             argumentStack %= drop n
             return args
 
-stepMachine :: MachineT ()
+
+stepMachine :: MachineT MachineProgress
 stepMachine = do
     code <- use code
     case code of
@@ -301,7 +299,7 @@ stepMachine = do
         CodeReturnInt i -> stepCodeReturnInt i
 
 -- | 'CodeEval' execution
-stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT ()
+stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT MachineProgress
 stepCodeEval local expr = do
     case expr of
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
@@ -309,19 +307,21 @@ stepCodeEval local expr = do
         ExprNodeCase expr alts -> stepCodeEvalCase local expr alts
         ExprNodeRawNumber num -> stepCodeEvalRawNumber num
 
-stepCodeEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT ()
-stepCodeEvalFnApplication local fnName vars = do
-     fnAddr <- lookupIdentifier local fnName >>= valueToAddr
-     localVals <- for vars (lookupAtom local)
-     argumentStack <>= localVals
-     code .= CodeEnter fnAddr
+stepCodeEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT MachineProgress
+stepCodeEvalFnApplication local lhsName vars = do
+     lhsValue <- lookupIdentifier local lhsName
+     -- it doesn't have the address of a function, don't continue
+     case lhsValue ^? _ValueAddr of
+        Nothing -> return MachineHalted
+        Just fnAddr ->  do
+               localVals <- for vars (lookupAtom local)
+               argumentStack <>= localVals
+               code .= CodeEnter fnAddr
+               return MachineStepped
 
 
-     return ()
 
-
-
-stepCodeEvalLet :: LocalEnvironment -> IsLetRecursive -> [Binding] -> ExprNode -> MachineT ()
+stepCodeEvalLet :: LocalEnvironment -> IsLetRecursive -> [Binding] -> ExprNode -> MachineT MachineProgress
 stepCodeEvalLet local isLetRecursive bindings inExpr = do
   let lookupEnv = local
   closureNameAddrMap <- for bindings  (\b -> do
@@ -332,24 +332,26 @@ stepCodeEvalLet local isLetRecursive bindings inExpr = do
 
   let newlocal = foldl  (\local (name, addr) -> M.insert name (ValueAddr addr) local)  local closureNameAddrMap
   code .= CodeEval inExpr newlocal
+  return MachineStepped
 
 returnStackPush :: Continuation -> MachineT ()
 returnStackPush cont = do
   returnStack %= (\rs -> cont:rs)
 
 
-
-stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAltType] -> MachineT ()
+stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAltType] -> MachineT MachineProgress
 stepCodeEvalCase local expr alts = do
   returnStackPush (Continuation alts local)
   code .= CodeEval expr local
+  return MachineStepped
 
-stepCodeEvalRawNumber :: RawNumber -> MachineT ()
+stepCodeEvalRawNumber :: RawNumber -> MachineT MachineProgress
 stepCodeEvalRawNumber rawnum = do
   code .= CodeReturnInt (rawnum ^. getRawNumber & read)
+  return MachineStepped
 
 -- | codeEnter execution
-stepCodeEnter :: Addr -> MachineT ()
+stepCodeEnter :: Addr -> MachineT MachineProgress
 stepCodeEnter addr = 
     do
         closure <- lookupAddrInHeap addr
@@ -363,7 +365,7 @@ stepCodeEnter addr =
 
 
 -- provide the lambda and the list of free variables for binding
-stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT ()
+stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT MachineProgress
 stepCodeEnterIntoNonupdatableClosure closure = do
     let l = closure ^. closureLambda
     let boundVarIdentifiers = l ^. lambdaBoundVarIdentifiers
@@ -377,6 +379,7 @@ stepCodeEnterIntoNonupdatableClosure closure = do
                                                 boundVarVals)
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
+    return MachineStepped
 
 
 -- | Return the variable if the continuation contains an alternative
@@ -419,11 +422,11 @@ unwrapAlts (a:as) p err = case a ^? p of
 
 
 -- | codeReturnInt execution
-stepCodeReturnInt :: Int -> MachineT ()
+stepCodeReturnInt :: Int -> MachineT MachineProgress
 stepCodeReturnInt i = do
   cont <- returnStackPop
   unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltRawNumber StgErrorExpectedCaseAltRawNumber
-  return ()
+  return MachineStepped
  
   
   
