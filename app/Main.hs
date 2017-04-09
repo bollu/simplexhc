@@ -25,7 +25,7 @@ genMachineTrace state =
       Right (progress, state') -> if progress == MachineHalted
                                  then ([state], Nothing)
                                  else let (traceNext, err) = genMachineTrace state' in 
-                                      (state:traceNext, err)
+                                      (state':traceNext, err)
 
 repl :: InputT IO ()
 repl = do 

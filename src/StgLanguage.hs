@@ -14,8 +14,8 @@ showStyle = PP.Style {
     ribbonsPerLine = 1.5
 }
 
--- mkNest :: Doc -> Doc
--- mkNest = nest 4
+mkNest :: Doc -> Doc
+mkNest = nest 4
 
 class Prettyable a where
     mkDoc :: a -> Doc
@@ -40,12 +40,12 @@ instance Show Identifier where
 instance Prettyable Identifier where
     mkDoc = text . show
 
-newtype RawNumber = RawNumber { _getRawNumber :: String } 
+newtype RawNumber = RawNumber { _getRawNumber :: String }  deriving(Eq)
 makeLenses ''RawNumber
 
 
 instance Show RawNumber where
-  show rawnum = "num:" ++ (rawnum ^. getRawNumber)
+  show rawnum = "num:#" ++ (rawnum ^. getRawNumber)
 
 instance Prettyable RawNumber where
     mkDoc = text . show
@@ -54,23 +54,27 @@ data TokenType = TokenTypePlus |
                  TokenTypeMinus | 
                  TokenTypeDiv | 
                  TokenTypeMultiply | 
-                 TokenTypeIdentifier Identifier | 
-                 TokenTypeConstructorName ConstructorName | 
+                 TokenTypeIdentifier !Identifier | 
+                 TokenTypeConstructorName !ConstructorName | 
                  TokenTypeLet |
                  TokenTypeLetrec |
                  TokenTypeIn |
                  TokenTypeCase |
                  TokenTypeOf |
                  TokenTypeDefine |
-                 TokenTypeUpdate Bool | -- true: should update, false: no update
+                 TokenTypeUpdate !Bool | -- true: should update, false: no update
                  TokenTypeThinArrow |
                  TokenTypeFatArrow |
                  TokenTypeSemicolon |
                  TokenTypeOpenBrace |
                  TokenTypeCloseBrace |
+                 -- | '('
+                 TokenTypeOpenParen |
+                 -- | ')'
+                 TokenTypeCloseParen |
                  TokenTypeComma |
                  TokenTypeEquals | 
-                 TokenTypeRawNumber RawNumber
+                 TokenTypeRawNumber !RawNumber
 
 
 instance Show TokenType where
@@ -94,6 +98,8 @@ instance Show TokenType where
   show TokenTypeSemicolon = ";"
   show TokenTypeOpenBrace = "{"
   show TokenTypeCloseBrace = "}"
+  show TokenTypeOpenParen = "("
+  show TokenTypeCloseParen = ")"
   show TokenTypeComma = "}"
 
 
@@ -107,8 +113,8 @@ data Trivia = Trivia {
 makeLenses ''Trivia
 
 data Token = Token {
-  _tokenType :: TokenType,
-  _tokenTrivia :: Trivia
+  _tokenType :: !TokenType,
+  _tokenTrivia :: !Trivia
 }
 
 
@@ -123,20 +129,20 @@ instance (Show Token) where
 
 
 
-data Atom = AtomRawNumber RawNumber | AtomIdentifier Identifier deriving(Show)
+data Atom = AtomRawNumber !RawNumber | AtomIdentifier !Identifier deriving(Show)
 
 instance Prettyable Atom where
     mkDoc (AtomRawNumber n) = mkDoc n
     mkDoc (AtomIdentifier ident) = mkDoc ident
 
 data Binding = Binding {
-  _bindingName :: Identifier,
-  _bindingLambda :: Lambda
+  _bindingName :: !Identifier,
+  _bindingLambda :: !Lambda
 }
 type Program = [Binding]
 
 
-data Constructor = Constructor ConstructorName [Identifier]
+data Constructor = Constructor !ConstructorName ![Identifier]
 
 instance Prettyable Constructor where
   mkDoc (Constructor name idents) = mkDoc name <+> (idents & map mkDoc & hsep)
@@ -146,33 +152,33 @@ instance Show Constructor where
 
 data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
-data ExprNode = ExprNodeBinop ExprNode Token ExprNode |
-               ExprNodeFnApplication Identifier [Atom] |
-               ExprNodeLet IsLetRecursive [Binding] ExprNode |
-               ExprNodeCase ExprNode [CaseAltType] |
-               ExprNodeRawNumber RawNumber
+data ExprNode = ExprNodeBinop !ExprNode !Token !ExprNode |
+               ExprNodeFnApplication !Identifier ![Atom] |
+               ExprNodeLet !IsLetRecursive ![Binding] !ExprNode |
+               ExprNodeCase !ExprNode ![CaseAltType] |
+               ExprNodeRawNumber !RawNumber
       
 
 data CaseAlt lhs = CaseAlt {
-  _caseAltLHS :: lhs,
-  _caseAltExpr :: ExprNode
+  _caseAltLHS :: !lhs,
+  _caseAltRHS :: !ExprNode
 }
 
 
 instance Prettyable lhs => Prettyable (CaseAlt lhs) where
   mkDoc CaseAlt{..} = mkDoc _caseAltLHS <+>
                       text "->" <+>
-                      mkDoc _caseAltExpr
+                      mkDoc _caseAltRHS
 
 instance Prettyable lhs => Show (CaseAlt lhs) where
     show = renderStyle showStyle . mkDoc
 
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
-                      CaseAltConstructor (CaseAlt Constructor) |
+                      CaseAltConstructor !(CaseAlt Constructor) |
                       -- | match with a number: 10 -> e
-                      CaseAltRawNumber (CaseAlt RawNumber) |
+                      CaseAltRawNumber !(CaseAlt RawNumber) |
                       -- | match with a variable: x -> e
-                      CaseAltVariable (CaseAlt Identifier) 
+                      CaseAltVariable !(CaseAlt Identifier) 
 
 
 
@@ -180,7 +186,7 @@ instance Prettyable CaseAltType where
   mkDoc (CaseAltConstructor altCons) = 
     mkDoc (_caseAltLHS altCons) <+>
     text "->"  <+>
-    mkDoc (_caseAltExpr altCons) 
+    mkDoc (_caseAltRHS altCons) 
 
   mkDoc (CaseAltRawNumber altRawNumber) = mkDoc altRawNumber
   mkDoc (CaseAltVariable altIdentifier) = mkDoc altIdentifier
@@ -189,10 +195,10 @@ instance Show CaseAltType where
   show = renderStyle showStyle . mkDoc
 
 data Lambda = Lambda {
-    _lambdaShouldUpdate :: Bool,
-    _lambdaFreeVarIdentifiers :: [Identifier],
-    _lambdaBoundVarIdentifiers :: [Identifier],
-    _lambdaExprNode :: ExprNode
+    _lambdaShouldUpdate :: !Bool,
+    _lambdaFreeVarIdentifiers :: ![Identifier],
+    _lambdaBoundVarIdentifiers :: ![Identifier],
+    _lambdaExprNode :: !ExprNode
 } 
 
 
@@ -237,6 +243,8 @@ instance Prettyable ExprNode where
                         bindingsstr = map mkDoc bindings & vcat
 
     mkDoc (ExprNodeRawNumber number) = mkDoc number
+    mkDoc (ExprNodeCase caseexpr caseAlts) = text "case" <+> mkDoc caseexpr <+> text "of" <+> text "{" $$ (mkNest altsDoc)  $$ text "}" where
+                                              altsDoc = fmap mkDoc caseAlts & vcat
 
 instance Show ExprNode where
     show = renderStyle showStyle . mkDoc

@@ -30,8 +30,8 @@ import Control.Monad.Error.Hoist
 -- readMaybe
 import Data.String.Utils
 
-data Continuation = Continuation { _continuationAlts :: [CaseAltType],
-                                   _continuationEnv :: LocalEnvironment
+data Continuation = Continuation { _continuationAlts :: ![CaseAltType],
+                                   _continuationEnv :: !LocalEnvironment
                                 }
 
 instance Prettyable Continuation where
@@ -82,8 +82,8 @@ newtype ClosureFreeVars = ClosureFreeVars { _getFreeVars :: [Value] } deriving(S
 instance Prettyable ClosureFreeVars where
   mkDoc freeVars = _getFreeVars freeVars & map mkDoc & punctuate (text ",") & hsep
 data Closure = Closure { 
-    _closureLambda :: Lambda,
-    _closureFreeVars :: ClosureFreeVars
+    _closureLambda :: !Lambda,
+    _closureFreeVars :: !ClosureFreeVars
 } deriving (Show)
 
 instance Prettyable Closure where
@@ -100,7 +100,7 @@ data Code = CodeEval ExprNode LocalEnvironment |
             CodeEnter Addr |
             CodeUninitialized |
             CodeReturnConstructor Constructor [Value] |
-            CodeReturnInt Int deriving(Show) 
+            CodeReturnInt RawNumber deriving(Show) 
 
 instance Prettyable Code where
   mkDoc (CodeEval expr env) = text "Eval" <+> braces (mkDoc expr) <+> text "|Local:" <+> braces(mkDoc env)
@@ -115,12 +115,12 @@ instance Prettyable Code where
 
 
 data MachineState = MachineState {
-    _argumentStack :: ArgumentStack,
-    _returnStack :: ReturnStack,
-    _updateStack :: UpdateStack,
-    _heap :: Heap,
-    _globalEnvironment :: GlobalEnvironment,
-    _code :: Code
+    _argumentStack :: !ArgumentStack,
+    _returnStack :: !ReturnStack,
+    _updateStack :: !UpdateStack,
+    _heap :: !Heap,
+    _globalEnvironment :: !GlobalEnvironment,
+    _code :: !Code
 }
 
 
@@ -155,24 +155,26 @@ data StgError =
         -- | 'compileProgram' could not find main
         StgErrorUnableToFindMain | 
         -- | 'lookupIdentifier' failed
-        StgErrorEnvLookupFailed Identifier LocalEnvironment GlobalEnvironment | 
+        StgErrorEnvLookupFailed !Identifier !LocalEnvironment !GlobalEnvironment | 
         -- | 'lookupAddrInHeap' failed
-        StgErrorHeapLookupFailed Addr Heap |
+        StgErrorHeapLookupFailed !Addr !Heap |
         -- | 'rawNumberToValue' failed
-        StgErrorUnableToMkPrimInt RawNumber  | 
+        StgErrorUnableToMkPrimInt !RawNumber  | 
         -- | 'takeNArgs' failed
-        StgErrorNotEnoughArgsOnStack Int ArgumentStack |
+        StgErrorNotEnoughArgsOnStack !Int !ArgumentStack |
         -- | 'continuationGetVariable' found no variable
-        StgErrorCaseAltsHasNoVariable Continuation |
+        StgErrorCaseAltsHasNoVariable !Continuation |
         -- | 'continuationGetVariable' found too many variables
-        StgErrorCaseAltsHasMoreThanOneVariable Continuation [CaseAlt Identifier] | 
+        StgErrorCaseAltsHasMoreThanOneVariable !Continuation ![CaseAlt Identifier] | 
         -- | 'caseAltsGetUniqueMatch' found overlapping patterns
         -- | FIXME: find a better repr for the CaseAlt. currently cumbersome
         StgErrorCaseAltsOverlappingPatterns | 
         -- | `returnStackPop` finds no continuation to return to
         StgErrorReturnStackEmpty |
         -- | `unwrapAlts` failed, unable to unwrap raw number
-        StgErrorExpectedCaseAltRawNumber CaseAltType deriving(Show)
+        StgErrorExpectedCaseAltRawNumber !CaseAltType | 
+        -- | 'xxx' failed, no matching pattern match found
+        StgErrorNoMatchingAltPatternRawNumber RawNumber [CaseAlt RawNumber] deriving(Show)
 
 makeLenses ''ClosureFreeVars
 makePrisms ''Value
@@ -194,6 +196,10 @@ uninitializedMachineState = MachineState {
     _code=CodeUninitialized
 }
 
+maybeToMachineT :: Maybe a -> StgError -> MachineT a
+maybeToMachineT (Nothing) err = throwError err
+maybeToMachineT (Just a) err = return a 
+
 runMachineT :: MachineT a -> MachineState -> Either StgError (a, MachineState)
 runMachineT machineT state = let (mVal, machineState) = runState (runExceptT . unMachineT $ machineT) state in
                     -- TODO: refactor with fmap
@@ -208,7 +214,7 @@ compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineSta
     setupBindings :: MachineT ()
     setupBindings = do 
       for_ prog allocateBinding
-      mainAddr <-  use globalEnvironment >>= (\x -> hoistError (const StgErrorUnableToFindMain) (x ^. at (Identifier "main"))) :: MachineT Addr
+      mainAddr <-  use globalEnvironment >>= (\x -> maybeToMachineT (x ^. at (Identifier "main")) StgErrorUnableToFindMain) :: MachineT Addr
       -- NOTE: this is different from STG paper. Does this even work?
       code .= CodeEnter mainAddr
     allocateBinding :: Binding -> MachineT ()
@@ -275,8 +281,7 @@ lookupAddrInHeap addr = do
     machineHeap <- use heap
     let mclosure = machineHeap ^. at addr :: Maybe Closure
     let errormsg = StgErrorHeapLookupFailed addr machineHeap :: StgError
-    let eclosure = (maybeToEither errormsg mclosure) :: Either StgError Closure
-    hoistError id eclosure
+    mclosure `maybeToMachineT` errormsg
 
 -- pop n values off the argument stack
 takeNArgs :: Int -> MachineT [Value]
@@ -347,7 +352,7 @@ stepCodeEvalCase local expr alts = do
 
 stepCodeEvalRawNumber :: RawNumber -> MachineT MachineProgress
 stepCodeEvalRawNumber rawnum = do
-  code .= CodeReturnInt (rawnum ^. getRawNumber & read)
+  code .= CodeReturnInt rawnum
   return MachineStepped
 
 -- | codeEnter execution
@@ -420,16 +425,17 @@ unwrapAlts (a:as) p err = case a ^? p of
                                   return $ (a:as')
                       Nothing -> throwError (err a)
 
+getEarlistAltWithPattern :: Eq a => [CaseAlt a] -> a -> Maybe (CaseAlt a)
+getEarlistAltWithPattern [] _  = Nothing
+getEarlistAltWithPattern (c:cs) a = if c ^. caseAltLHS == a
+                                    then Just c
+                                    else getEarlistAltWithPattern cs a
 
 -- | codeReturnInt execution
-stepCodeReturnInt :: Int -> MachineT MachineProgress
+stepCodeReturnInt :: RawNumber -> MachineT MachineProgress
 stepCodeReturnInt i = do
   cont <- returnStackPop
   unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltRawNumber StgErrorExpectedCaseAltRawNumber
+  alt <- (getEarlistAltWithPattern unwrapped_alts i ) `maybeToMachineT` (StgErrorNoMatchingAltPatternRawNumber i unwrapped_alts)
+  code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
- 
-  
-  
-  
-  
-

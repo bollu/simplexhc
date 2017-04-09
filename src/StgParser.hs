@@ -20,6 +20,7 @@ identfierTokenizer = do
 
 numberTokenizer :: StgTokenizer TokenType
 numberTokenizer = do
+  hash <- char '#'
   number_str <- many1 digit
   return $ TokenTypeRawNumber (RawNumber number_str)
 
@@ -60,8 +61,12 @@ glyphTokenizer = do
     let equals = makeSymbolTokenizer "=" TokenTypeEquals
     let openbrace = makeSymbolTokenizer "{" TokenTypeOpenBrace
     let closebrace = makeSymbolTokenizer "}" TokenTypeCloseBrace
+    let openParen = makeSymbolTokenizer "(" TokenTypeOpenParen
+    let closeParen = makeSymbolTokenizer ")" TokenTypeCloseParen
     let comma = makeSymbolTokenizer "," TokenTypeComma
-    (try thinArrow <|> try fatArrow <|> try equals <|> try semicolon <|> try openbrace <|> try closebrace <|> try comma)
+    (try thinArrow <|> try fatArrow <|> try equals <|> try semicolon <|>
+     try openbrace <|> try closebrace <|> try comma <|>
+     try openParen <|> try closeParen)
     where
         makeSymbolTokenizer :: String -> TokenType -> StgTokenizer TokenType
         makeSymbolTokenizer str tokenType = fmap (const tokenType) (string str) 
@@ -160,7 +165,7 @@ caseConstructorp = do
   istoken (^? _TokenTypeCase)
   e <- exprp
   istoken (^? _TokenTypeOf)
-  alts <- sepEndBy caseConstructorAltp semicolonp
+  alts <- sepEndBy1 caseConstructorAltp semicolonp
   return $ ExprNodeCase e alts
 
 
@@ -176,15 +181,23 @@ caseRawNumberp = do
   istoken (^? _TokenTypeCase)
   num <- rawnumberp
   istoken (^? _TokenTypeOf)
-  alts <- sepEndBy caseRawNumberAltp semicolonp
+  alts <- sepEndBy1 caseRawNumberAltp semicolonp
   return $ ExprNodeCase num alts
+
+parenExprp :: StgParser ExprNode
+parenExprp = do
+          istoken (^? _TokenTypeOpenParen)
+          expr <- exprp
+          istoken (^? _TokenTypeCloseParen)
+          return expr
 
 exprp :: StgParser ExprNode
 exprp = try applicationp <|>
         try letp <|>
-        try caseConstructorp <|>
+        --  try caseConstructorp <|>
         try caseRawNumberp <|>
-        try rawnumberp
+        try rawnumberp <|>
+        try parenExprp
 
 
 -- Identifier list: {" id1 "," id2 "," .. idn "} | "{}"
@@ -224,7 +237,7 @@ bindingp = do
 
 
 stgParser :: StgParser Program
-stgParser = sepEndBy bindingp semicolonp -- (\x -> [x]) <$> bindingp
+stgParser = sepEndBy1 bindingp semicolonp
 
 parseStg :: [Token] -> Either ParseError Program
 parseStg tokens = parse stgParser "(unknown)" tokens
