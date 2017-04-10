@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE DeriveTraversable #-}
 
 module StgMachine where
 import StgLanguage
@@ -68,9 +69,20 @@ instance Show Value where
     show = renderStyle showStyle . mkDoc
 
 -- | Stack of 'Value'
-type ArgumentStack = [Value]
-type ReturnStack = [Continuation]
-type UpdateStack = [UpdateFrame]
+newtype Stack a = Stack { _unStack :: [a] } deriving(Functor, Monoid, Foldable, Traversable)
+stackEmpty :: Stack a
+stackEmpty = Stack []
+
+instance Prettyable a => Prettyable (Stack a) where
+  mkDoc (Stack []) = text "EMPTY"
+  mkDoc (Stack xs) = text ("count: " ++ show (length xs)) $+$ text "TOP" $+$ ((fmap mkDoc xs) & sep) $+$ text "BOTTOM"
+
+instance Prettyable a => Show (Stack a) where
+  show = renderStyle showStyle . mkDoc
+
+type ArgumentStack = Stack Value
+type ReturnStack = Stack Continuation
+type UpdateStack = Stack UpdateFrame
 type Heap = M.Map Addr Closure
 
 
@@ -133,9 +145,9 @@ instance Prettyable MachineState where
    text "*** heap:" $$ heapDoc $+$
    text "*** env:" $$ globalEnvDoc $+$
    text "---" where
-    argsDoc = _argumentStack & map mkDoc & hsep
-    returnDoc = _returnStack & map mkDoc & hsep
-    updateDoc = _updateStack & map mkDoc & hsep
+    argsDoc = _argumentStack & mkDoc
+    returnDoc = _returnStack & mkDoc
+    updateDoc = _updateStack & mkDoc
     heapDoc = _heap & mkDoc
     globalEnvDoc = _globalEnvironment & mkDoc 
     code = _code & mkDoc
@@ -183,14 +195,15 @@ makeLenses ''Code
 makeLenses ''MachineState
 makeLenses ''Addr
 makeLenses ''Continuation
+makeLenses ''Stack
 
 -- runExceptT :: ExceptT e (State s) a -> State s (Either e a)
 
 uninitializedMachineState :: MachineState
 uninitializedMachineState = MachineState {
-    _argumentStack=[],
-    _returnStack = [],
-    _updateStack = [],
+    _argumentStack=stackEmpty,
+    _returnStack = stackEmpty,
+    _updateStack = stackEmpty,
     _heap=M.empty,
     _globalEnvironment=M.empty,
     _code=CodeUninitialized
@@ -286,12 +299,12 @@ lookupAddrInHeap addr = do
 -- pop n values off the argument stack
 takeNArgs :: Int -> MachineT [Value]
 takeNArgs n = do
-    machineArgStack <- use argumentStack
-    if length machineArgStack < n
-        then throwError $ StgErrorNotEnoughArgsOnStack n machineArgStack 
+    argStackList <- use (argumentStack . unStack)
+    if length argStackList < n
+        then throwError $ StgErrorNotEnoughArgsOnStack n (Stack argStackList)
         else do
-            let args = take n machineArgStack
-            argumentStack %= drop n
+            let args = take n argStackList
+            argumentStack .= Stack (drop n argStackList)
             return args
 
 
@@ -320,7 +333,7 @@ stepCodeEvalFnApplication local lhsName vars = do
         Nothing -> return MachineHalted
         Just fnAddr ->  do
                localVals <- for vars (lookupAtom local)
-               argumentStack <>= localVals
+               argumentStack `stackPushN` localVals
                code .= CodeEnter fnAddr
                return MachineStepped
 
@@ -339,9 +352,16 @@ stepCodeEvalLet local isLetRecursive bindings inExpr = do
   code .= CodeEval inExpr newlocal
   return MachineStepped
 
+
+stackPushN :: Lens' MachineState (Stack a) -> [a] -> MachineT ()
+stackPushN stackLens as'  = do
+            as <- use (stackLens . unStack)
+            stackLens .= Stack (as' ++ as)
+
+
 returnStackPush :: Continuation -> MachineT ()
 returnStackPush cont = do
-  returnStack %= (\rs -> cont:rs)
+  returnStack %= (\(Stack rs) -> Stack (cont:rs))
 
 
 stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAltType] -> MachineT MachineProgress
@@ -414,7 +434,7 @@ returnStackPop = do
   then
     throwError StgErrorReturnStackEmpty
   else do
-    top <- returnStack %%= (\(r:rs) -> (r, rs))
+    top <- returnStack %%= (\(Stack (r:rs)) -> (r, Stack rs))
     return top
 
 unwrapAlts :: [CaseAltType] -> Prism' CaseAltType a -> (CaseAltType -> StgError) -> MachineT [a]
