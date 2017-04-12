@@ -14,7 +14,7 @@ type StgParser a = GenParser Token () a
 
 identfierTokenizer :: StgTokenizer Identifier
 identfierTokenizer = do
-    c <- letter
+    c <- lower
     rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
     return $ Identifier (c:rest)
 
