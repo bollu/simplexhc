@@ -22,6 +22,9 @@ import Control.Monad.Except
 import Data.Traversable
 import Data.Foldable
 
+-- | TODO: use this for colored output with the string functions
+import System.Console.ANSI
+
 -- for <>
 import Data.Monoid
 
@@ -30,6 +33,18 @@ import Control.Monad.Error.Hoist
 
 -- readMaybe
 import Data.String.Utils
+
+colorHeading :: Doc
+colorHeading = zeroWidthText (setSGRCode [SetColor Foreground Vivid Red])
+
+colorBlue :: Doc
+colorBlue = zeroWidthText (setSGRCode [SetColor Foreground Vivid Blue])
+
+colorReset :: Doc
+colorReset = zeroWidthText (setSGRCode [Reset])
+
+heading :: Doc -> Doc
+heading d = colorHeading PP.<> d PP.<> colorReset
 
 data Continuation = Continuation { _continuationAlts :: ![CaseAltType],
                                    _continuationEnv :: !LocalEnvironment
@@ -52,7 +67,7 @@ instance Prettyable UpdateFrame where
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
 instance Prettyable Addr where
-    mkDoc addr = text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))
+    mkDoc addr = colorBlue PP.<> (text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> colorReset
 
 instance Show Addr where
     show = renderStyle showStyle . mkDoc
@@ -63,7 +78,7 @@ data Value = ValueAddr Addr | ValuePrimInt Int
 
 instance Prettyable Value where
   mkDoc (ValueAddr addr) = text "val:" PP.<> mkDoc addr
-  mkDoc (ValuePrimInt int) = text ("val:" ++ show int)
+  mkDoc (ValuePrimInt int) = text ("val:#" ++ show int)
 
 instance Show Value where
     show = renderStyle showStyle . mkDoc
@@ -138,13 +153,13 @@ data MachineState = MachineState {
 
 instance Prettyable MachineState where
   mkDoc MachineState{..} = 
-   text "*** code:" $$ code $+$
-   text "*** args:" $$ argsDoc $+$
-   text "*** return:" $$ returnDoc $+$
-   text "*** update:" $$ updateDoc $+$
-   text "*** heap:" $$ heapDoc $+$
-   text "*** env:" $$ globalEnvDoc $+$
-   text "---" where
+   heading (text "*** code:") $$ code $+$
+   heading (text "*** args:") $$ argsDoc $+$
+   heading (text "*** return:") $$ returnDoc $+$
+   heading (text "*** update:") $$ updateDoc $+$
+   heading (text "*** heap:") $$ heapDoc $+$
+   heading (text "*** env:") $$ globalEnvDoc $+$
+   heading (text "---") where
     argsDoc = _argumentStack & mkDoc
     returnDoc = _returnStack & mkDoc
     updateDoc = _updateStack & mkDoc

@@ -45,7 +45,7 @@ makeLenses ''RawNumber
 
 
 instance Show RawNumber where
-  show rawnum = "num:#" ++ (rawnum ^. getRawNumber)
+  show rawnum = "num:" ++ (rawnum ^. getRawNumber)
 
 instance Prettyable RawNumber where
     mkDoc = text . show
@@ -243,7 +243,7 @@ instance Prettyable ExprNode where
                         bindingsstr = map mkDoc bindings & vcat
 
     mkDoc (ExprNodeRawNumber number) = mkDoc number
-    mkDoc (ExprNodeCase caseexpr caseAlts) = text "case" <+> mkDoc caseexpr <+> text "of" <+> text "{" $$ (mkNest altsDoc)  $$ text "}" where
+    mkDoc (ExprNodeCase caseexpr caseAlts) = text "case" <+> mkDoc caseexpr <+> text "of" <+> text "{" <+> (mkNest altsDoc)  <+> text "}" where
                                               altsDoc = fmap mkDoc caseAlts & vcat
 
 instance Show ExprNode where
