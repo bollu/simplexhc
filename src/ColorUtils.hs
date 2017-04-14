@@ -3,18 +3,21 @@ module ColorUtils where
 import System.Console.ANSI
 import Text.PrettyPrint as PP
 
-colorAddr :: Doc
-colorAddr = zeroWidthText (setSGRCode [SetColor Foreground Vivid Green, SetUnderlining SingleUnderline])
+styleAddr :: Doc
+styleAddr = zeroWidthText (setSGRCode [SetColor Foreground Vivid Green, SetUnderlining SingleUnderline])
 
 
-colorTag :: Doc
-colorTag = zeroWidthText (setSGRCode [SetColor Foreground Vivid White, SetConsoleIntensity BoldIntensity])
+styleTag :: Doc
+styleTag = zeroWidthText (setSGRCode [SetColor Foreground Vivid White, SetConsoleIntensity BoldIntensity])
 
-colorHeading :: Doc
-colorHeading = zeroWidthText (setSGRCode [SetColor Foreground Vivid Blue])
+mkStyleTag :: Doc -> Doc
+mkStyleTag tag = styleTag <> tag <> styleReset
 
-colorReset :: Doc
-colorReset = zeroWidthText (setSGRCode [Reset])
+styleHeading :: Doc
+styleHeading = zeroWidthText (setSGRCode [SetColor Foreground Vivid Blue])
+
+styleReset :: Doc
+styleReset = zeroWidthText (setSGRCode [Reset])
 
 heading :: Doc -> Doc
-heading d = colorHeading PP.<> d PP.<> colorReset
+heading d = styleHeading PP.<> d PP.<> styleReset

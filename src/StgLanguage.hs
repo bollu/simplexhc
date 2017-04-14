@@ -36,7 +36,7 @@ instance Prettyable ConstructorName where
 newtype VarName = VarName { _getVariable :: String } deriving(Ord, Eq)
 
 instance Prettyable VarName where
-    mkDoc var = colorTag <> (text "var:") <> colorReset <> (text (_getVariable var))
+    mkDoc var = mkStyleTag (text "var:") <> (text (_getVariable var))
 
 instance Show VarName where
     show = renderStyle showStyle . mkDoc
@@ -46,7 +46,7 @@ makeLenses ''RawNumber
 
 
 instance Show RawNumber where
-  show rawnum = "num:" ++ (rawnum ^. getRawNumber)
+  show rawnum = "rawnum:" ++ (rawnum ^. getRawNumber)
 
 instance Prettyable RawNumber where
     mkDoc = text . show

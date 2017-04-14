@@ -56,7 +56,7 @@ instance Prettyable UpdateFrame where
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
 instance Prettyable Addr where
-    mkDoc addr = colorAddr PP.<> (text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> colorReset
+    mkDoc addr = styleAddr PP.<> (text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> styleReset
 
 instance Show Addr where
     show = renderStyle showStyle . mkDoc
@@ -66,8 +66,8 @@ data Value = ValueAddr Addr | ValuePrimInt Int
 
 
 instance Prettyable Value where
-  mkDoc (ValueAddr addr) = text "val:" PP.<> mkDoc addr
-  mkDoc (ValuePrimInt int) = text ("val:#" ++ show int)
+  mkDoc (ValueAddr addr) = mkStyleTag (text "val:") PP.<> mkDoc addr
+  mkDoc (ValuePrimInt int) = mkStyleTag (text "val:") PP.<> text "#" PP.<> text (show int)
 
 instance Show Value where
     show = renderStyle showStyle . mkDoc
@@ -103,7 +103,9 @@ data Closure = Closure {
 } deriving (Show)
 
 instance Prettyable Closure where
-  mkDoc (Closure{..}) = text "cls:<<" <+> mkDoc _closureLambda $$ text "|" <+> mkDoc  _closureFreeVars <+> text ">>"
+  mkDoc (Closure{..}) = (mkStyleTag (text "cls:<<"))
+                         <+> mkDoc _closureLambda $$
+                         text "|" <+> mkDoc  _closureFreeVars <+> (mkStyleTag (text ">>"))
 
 
 type LocalEnvironment = M.Map VarName Value
