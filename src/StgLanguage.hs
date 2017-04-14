@@ -6,6 +6,7 @@ import Control.Monad.Trans.Class
 import Control.Lens
 import Text.ParserCombinators.Parsec
 import Text.PrettyPrint as PP
+import ColorUtils
 
 showStyle :: PP.Style
 showStyle = PP.Style {
@@ -31,14 +32,14 @@ instance Show ConstructorName where
 
 instance Prettyable ConstructorName where
     mkDoc = text . show
-newtype Identifier = Identifier { _getIdentifier :: String } deriving(Ord, Eq)
-makeLenses ''Identifier
 
-instance Show Identifier where
-  show ident = "ident:" ++ (ident ^. getIdentifier) 
+newtype VarName = VarName { _getVariable :: String } deriving(Ord, Eq)
 
-instance Prettyable Identifier where
-    mkDoc = text . show
+instance Prettyable VarName where
+    mkDoc var = colorTag <> (text "var:") <> colorReset <> (text (_getVariable var))
+
+instance Show VarName where
+    show = renderStyle showStyle . mkDoc
 
 newtype RawNumber = RawNumber { _getRawNumber :: String }  deriving(Eq)
 makeLenses ''RawNumber
@@ -54,7 +55,7 @@ data TokenType = TokenTypePlus |
                  TokenTypeMinus | 
                  TokenTypeDiv | 
                  TokenTypeMultiply | 
-                 TokenTypeIdentifier !Identifier | 
+                 TokenTypeVarName !VarName | 
                  TokenTypeConstructorName !ConstructorName | 
                  TokenTypeLet |
                  TokenTypeLetrec |
@@ -82,7 +83,7 @@ instance Show TokenType where
   show TokenTypeMinus = "-"
   show TokenTypeDiv = "/"
   show TokenTypeMultiply = "*"
-  show (TokenTypeIdentifier ident) = show ident
+  show (TokenTypeVarName var) = show var
   show (TokenTypeConstructorName name) = show name
   show (TokenTypeRawNumber num) = show num
   show TokenTypeLet = "let"
@@ -129,20 +130,20 @@ instance (Show Token) where
 
 
 
-data Atom = AtomRawNumber !RawNumber | AtomIdentifier !Identifier deriving(Show)
+data Atom = AtomRawNumber !RawNumber | AtomVarName !VarName deriving(Show)
 
 instance Prettyable Atom where
     mkDoc (AtomRawNumber n) = mkDoc n
-    mkDoc (AtomIdentifier ident) = mkDoc ident
+    mkDoc (AtomVarName var) = mkDoc var
 
 data Binding = Binding {
-  _bindingName :: !Identifier,
+  _bindingName :: !VarName,
   _bindingLambda :: !Lambda
 }
 type Program = [Binding]
 
 
-data Constructor = Constructor !ConstructorName ![Identifier]
+data Constructor = Constructor !ConstructorName ![Atom]
 
 instance Prettyable Constructor where
   mkDoc (Constructor name idents) = mkDoc name <+> (idents & map mkDoc & hsep)
@@ -153,7 +154,8 @@ instance Show Constructor where
 data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
 data ExprNode = ExprNodeBinop !ExprNode !Token !ExprNode |
-               ExprNodeFnApplication !Identifier ![Atom] |
+               ExprNodeFnApplication !VarName ![Atom] |
+               ExprNodeConstructor !Constructor |
                ExprNodeLet !IsLetRecursive ![Binding] !ExprNode |
                ExprNodeCase !ExprNode ![CaseAltType] |
                ExprNodeRawNumber !RawNumber
@@ -173,12 +175,18 @@ instance Prettyable lhs => Prettyable (CaseAlt lhs) where
 instance Prettyable lhs => Show (CaseAlt lhs) where
     show = renderStyle showStyle . mkDoc
 
+data ConstructorPatternMatch = ConstructorPatternMatch ConstructorName [VarName]
+
+instance Prettyable ConstructorPatternMatch where
+  mkDoc (ConstructorPatternMatch consName vars) = 
+      mkDoc consName <+> (fmap mkDoc vars & punctuate comma & hsep & braces)
+
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
-                      CaseAltConstructor !(CaseAlt Constructor) |
+                      CaseAltConstructor !(CaseAlt ConstructorPatternMatch) |
                       -- | match with a number: 10 -> e
                       CaseAltRawNumber !(CaseAlt RawNumber) |
                       -- | match with a variable: x -> e
-                      CaseAltVariable !(CaseAlt Identifier) 
+                      CaseAltVariable !(CaseAlt VarName) 
 
 
 
@@ -196,8 +204,8 @@ instance Show CaseAltType where
 
 data Lambda = Lambda {
     _lambdaShouldUpdate :: !Bool,
-    _lambdaFreeVarIdentifiers :: ![Identifier],
-    _lambdaBoundVarIdentifiers :: ![Identifier],
+    _lambdaFreeVarIdentifiers :: ![VarName],
+    _lambdaBoundVarIdentifiers :: ![VarName],
     _lambdaExprNode :: !ExprNode
 } 
 
@@ -224,6 +232,7 @@ makeLenses ''Atom
 makePrisms ''ExprNode
 makePrisms ''TokenType
 makePrisms ''CaseAltType
+makeLenses ''VarName
 
 
 instance Prettyable ExprNode where

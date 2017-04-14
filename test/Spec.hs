@@ -5,6 +5,9 @@ import Test.Tasty.HUnit
 import Data.List
 import Data.Ord
 
+mkBoxedNumber :: Int -> Expr
+mkBoxedNumber i = 
+
 main = defaultMain tests
 
 tests :: TestTree

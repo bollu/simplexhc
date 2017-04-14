@@ -17,7 +17,8 @@ library
   hs-source-dirs:      src
   exposed-modules:     StgLanguage,
                        StgParser,
-                       StgMachine
+                       StgMachine,
+                       ColorUtils
 
   build-depends:       base >= 4.7 && < 5,
                        lens,

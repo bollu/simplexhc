@@ -12,11 +12,11 @@ import Control.Monad.Error.Hoist
 type StgTokenizer a = GenParser Char () a 
 type StgParser a = GenParser Token () a
 
-identfierTokenizer :: StgTokenizer Identifier
-identfierTokenizer = do
+varNameTokenizer :: StgTokenizer VarName
+varNameTokenizer = do
     c <- lower
     rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
-    return $ Identifier (c:rest)
+    return $ VarName (c:rest)
 
 numberTokenizer :: StgTokenizer TokenType
 numberTokenizer = do
@@ -32,15 +32,15 @@ constructorTokenizer = do
 
 alphanumericTokenizer :: StgTokenizer TokenType
 alphanumericTokenizer = do
-    ident <- identfierTokenizer
-    return $ case ident ^. getIdentifier of
+    var <- varNameTokenizer
+    return $ case var ^. getVariable of
                 "define" -> TokenTypeDefine
                 "of" -> TokenTypeOf
                 "case" -> TokenTypeCase
                 "let" -> TokenTypeLet
                 "letrec" -> TokenTypeLetrec
                 "in" -> TokenTypeIn
-                _ -> TokenTypeIdentifier ident
+                _ -> TokenTypeVarName var
 
 updatetokenizer :: StgTokenizer TokenType
 updatetokenizer = do
@@ -90,8 +90,8 @@ istoken pred = tokenPrim show nextpos acceptor where
   nextpos _ token _ = token ^. tokenTrivia . triviaSourcePos
   acceptor token =  token ^. tokenType & pred
 
-identifierp :: StgParser Identifier
-identifierp = istoken (^? _TokenTypeIdentifier)
+varNamep :: StgParser VarName
+varNamep = istoken (^? _TokenTypeVarName)
 
 rawNumberp :: StgParser RawNumber
 rawNumberp = istoken (^? _TokenTypeRawNumber)
@@ -102,7 +102,7 @@ updatep = istoken (^? _TokenTypeUpdate)
 atomp :: StgParser Atom
 atomp = identp <|> numberp
     where
-        identp = AtomIdentifier <$> identifierp
+        identp = AtomVarName <$> varNamep
         numberp = AtomRawNumber <$> rawNumberp
 
 
@@ -127,7 +127,7 @@ atomsp = do
 -- Function application: fn_name "{" atom1 "," atom2 ... "}" | {}
 applicationp :: StgParser ExprNode
 applicationp = do
-        fn_name <- identifierp
+        fn_name <- varNamep
         atoms <- atomsp
         return $ ExprNodeFnApplication fn_name atoms
 
@@ -152,11 +152,12 @@ letp = do
 caseConstructorAltp :: StgParser CaseAltType
 caseConstructorAltp = do
   consname <- istoken (^? _TokenTypeConstructorName)  
-  consparams <- many identifierp
+  consvars <- variableListp
   istoken (^? _TokenTypeThinArrow)
   rhs <- exprp
-  let constructor = Constructor consname consparams
-  return $ CaseAltConstructor ((CaseAlt constructor) rhs)
+  let patternMatch = ConstructorPatternMatch consname consvars
+  
+  return $ CaseAltConstructor (CaseAlt patternMatch rhs)
 
   
 
@@ -200,10 +201,10 @@ exprp = try applicationp <|>
         try parenExprp
 
 
--- Identifier list: {" id1 "," id2 "," .. idn "} | "{}"
-identifierListp ::StgParser [Identifier]
-identifierListp = do
-    idents <- bracesp (sepEndBy identifierp  commap)
+-- VarName list: {" id1 "," id2 "," .. idn "} | "{}"
+variableListp ::StgParser [VarName]
+variableListp = do
+    idents <- bracesp (sepEndBy varNamep  commap)
     return idents
 
 
@@ -212,9 +213,9 @@ identifierListp = do
 -- {x y} \n {z}  -> f x y z
 lambdap :: StgParser Lambda
 lambdap = do
-    freeVars <- identifierListp
+    freeVars <- variableListp
     shouldUpdate <- updatep
-    boundVars <- identifierListp
+    boundVars <- variableListp
     istoken (^? _TokenTypeThinArrow)
     rhs <- exprp
     return Lambda {
@@ -229,7 +230,7 @@ lambdap = do
 bindingp :: StgParser Binding
 bindingp = do
   istoken (^? _TokenTypeDefine)
-  name <- identifierp
+  name <- varNamep
   istoken (^? _TokenTypeEquals)
   lambda <- lambdap
   return $ Binding name lambda

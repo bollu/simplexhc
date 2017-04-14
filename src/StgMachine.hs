@@ -22,8 +22,7 @@ import Control.Monad.Except
 import Data.Traversable
 import Data.Foldable
 
--- | TODO: use this for colored output with the string functions
-import System.Console.ANSI
+import ColorUtils
 
 -- for <>
 import Data.Monoid
@@ -34,17 +33,7 @@ import Control.Monad.Error.Hoist
 -- readMaybe
 import Data.String.Utils
 
-colorHeading :: Doc
-colorHeading = zeroWidthText (setSGRCode [SetColor Foreground Vivid Red])
 
-colorBlue :: Doc
-colorBlue = zeroWidthText (setSGRCode [SetColor Foreground Vivid Blue])
-
-colorReset :: Doc
-colorReset = zeroWidthText (setSGRCode [Reset])
-
-heading :: Doc -> Doc
-heading d = colorHeading PP.<> d PP.<> colorReset
 
 data Continuation = Continuation { _continuationAlts :: ![CaseAltType],
                                    _continuationEnv :: !LocalEnvironment
@@ -67,7 +56,7 @@ instance Prettyable UpdateFrame where
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
 instance Prettyable Addr where
-    mkDoc addr = colorBlue PP.<> (text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> colorReset
+    mkDoc addr = colorAddr PP.<> (text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> colorReset
 
 instance Show Addr where
     show = renderStyle showStyle . mkDoc
@@ -101,8 +90,8 @@ type UpdateStack = Stack UpdateFrame
 type Heap = M.Map Addr Closure
 
 
--- | Maps identifiers to addresses of the closures
-type GlobalEnvironment = M.Map Identifier Addr
+-- | Maps VarName names to addresses of the closures
+type GlobalEnvironment = M.Map VarName Addr
 
 -- | has bindings of free variables with a 'LambdaForm'
 newtype ClosureFreeVars = ClosureFreeVars { _getFreeVars :: [Value] } deriving(Show)
@@ -117,7 +106,7 @@ instance Prettyable Closure where
   mkDoc (Closure{..}) = text "cls:<<" <+> mkDoc _closureLambda $$ text "|" <+> mkDoc  _closureFreeVars <+> text ">>"
 
 
-type LocalEnvironment = M.Map Identifier Value
+type LocalEnvironment = M.Map VarName Value
 
 instance (Prettyable k, Prettyable v) => Prettyable (M.Map k v) where
   mkDoc m = (fmap (uncurry mkKvDoc) (M.toList m))  & punctuate (text ";") & vcat where
@@ -153,12 +142,12 @@ data MachineState = MachineState {
 
 instance Prettyable MachineState where
   mkDoc MachineState{..} = 
-   heading (text "*** code:") $$ code $+$
-   heading (text "*** args:") $$ argsDoc $+$
-   heading (text "*** return:") $$ returnDoc $+$
-   heading (text "*** update:") $$ updateDoc $+$
-   heading (text "*** heap:") $$ heapDoc $+$
-   heading (text "*** env:") $$ globalEnvDoc $+$
+   heading (text "*** Code:") $$ code $+$
+   heading (text "*** Args:") $$ argsDoc $+$
+   heading (text "*** Return:") $$ returnDoc $+$
+   heading (text "*** Update:") $$ updateDoc $+$
+   heading (text "*** Heap:") $$ heapDoc $+$
+   heading (text "*** Env:") $$ globalEnvDoc $+$
    heading (text "---") where
     argsDoc = _argumentStack & mkDoc
     returnDoc = _returnStack & mkDoc
@@ -181,8 +170,8 @@ newtype MachineT a = MachineT { unMachineT :: ExceptT StgError (State MachineSta
 data StgError = 
         -- | 'compileProgram' could not find main
         StgErrorUnableToFindMain | 
-        -- | 'lookupIdentifier' failed
-        StgErrorEnvLookupFailed !Identifier !LocalEnvironment !GlobalEnvironment | 
+        -- | 'lookupVariable' failed
+        StgErrorEnvLookupFailed !VarName !LocalEnvironment !GlobalEnvironment | 
         -- | 'lookupAddrInHeap' failed
         StgErrorHeapLookupFailed !Addr !Heap |
         -- | 'rawNumberToValue' failed
@@ -192,7 +181,7 @@ data StgError =
         -- | 'continuationGetVariable' found no variable
         StgErrorCaseAltsHasNoVariable !Continuation |
         -- | 'continuationGetVariable' found too many variables
-        StgErrorCaseAltsHasMoreThanOneVariable !Continuation ![CaseAlt Identifier] | 
+        StgErrorCaseAltsHasMoreThanOneVariable !Continuation ![CaseAlt VarName] | 
         -- | 'caseAltsGetUniqueMatch' found overlapping patterns
         -- | FIXME: find a better repr for the CaseAlt. currently cumbersome
         StgErrorCaseAltsOverlappingPatterns | 
@@ -242,7 +231,7 @@ compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineSta
     setupBindings :: MachineT ()
     setupBindings = do 
       for_ prog allocateBinding
-      mainAddr <-  use globalEnvironment >>= (\x -> maybeToMachineT (x ^. at (Identifier "main")) StgErrorUnableToFindMain) :: MachineT Addr
+      mainAddr <-  use globalEnvironment >>= (\x -> maybeToMachineT (x ^. at (VarName "main")) StgErrorUnableToFindMain) :: MachineT Addr
       -- NOTE: this is different from STG paper. Does this even work?
       code .= CodeEnter mainAddr
     allocateBinding :: Binding -> MachineT ()
@@ -264,9 +253,9 @@ isMachineStateFinal m = case m ^. code of
                           (CodeEval expr _) -> isExprPrimitive expr
                           _ -> False
 
--- | Try to lookup 'Identifier' in the local & global environments. Fail if unable to lookup.
-lookupIdentifier :: LocalEnvironment -> Identifier -> MachineT Value
-lookupIdentifier localEnv ident = do
+-- | Try to lookup 'VarName' in the local & global environments. Fail if unable to lookup.
+lookupVariable :: LocalEnvironment -> VarName -> MachineT Value
+lookupVariable localEnv ident = do
         globalEnv <- use globalEnvironment
         let localLookup = (localEnv ^. at ident)
         let globalLookup = (ValueAddr <$> (globalEnv ^. at ident))
@@ -282,7 +271,7 @@ rawNumberToValue raw = maybeToEither errormsg mval where
 
 lookupAtom :: LocalEnvironment -> Atom -> MachineT Value
 lookupAtom _ (AtomRawNumber r) = hoistError id (rawNumberToValue r)
-lookupAtom localEnv (AtomIdentifier ident) = lookupIdentifier localEnv ident
+lookupAtom localEnv (AtomVarName ident) = lookupVariable localEnv ident
 
 
 
@@ -290,7 +279,7 @@ lookupAtom localEnv (AtomIdentifier ident) = lookupIdentifier localEnv ident
 mkClosureFromLambda :: Lambda -> LocalEnvironment -> MachineT Closure
 mkClosureFromLambda lambda localenv = 
     do
-      freeVarVals <- for (lambda ^. lambdaFreeVarIdentifiers) (lookupIdentifier  localenv)
+      freeVarVals <- for (lambda ^. lambdaFreeVarIdentifiers) (lookupVariable  localenv)
       let cls = Closure {
         _closureLambda = lambda,
         _closureFreeVars = ClosureFreeVars (freeVarVals)
@@ -340,9 +329,9 @@ stepCodeEval local expr = do
         ExprNodeCase expr alts -> stepCodeEvalCase local expr alts
         ExprNodeRawNumber num -> stepCodeEvalRawNumber num
 
-stepCodeEvalFnApplication :: LocalEnvironment -> Identifier -> [Atom] -> MachineT MachineProgress
+stepCodeEvalFnApplication :: LocalEnvironment -> VarName -> [Atom] -> MachineT MachineProgress
 stepCodeEvalFnApplication local lhsName vars = do
-     lhsValue <- lookupIdentifier local lhsName
+     lhsValue <- lookupVariable local lhsName
      -- it doesn't have the address of a function, don't continue
      case lhsValue ^? _ValueAddr of
         Nothing -> return MachineHalted
@@ -408,14 +397,14 @@ stepCodeEnter addr =
 stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT MachineProgress
 stepCodeEnterIntoNonupdatableClosure closure = do
     let l = closure ^. closureLambda
-    let boundVarIdentifiers = l ^. lambdaBoundVarIdentifiers
-    let freeVarIdentifiers = l ^. lambdaFreeVarIdentifiers
+    let boundVars = l ^. lambdaBoundVarIdentifiers
+    let freeVars = l ^. lambdaFreeVarIdentifiers
     let evalExpr =  l ^. lambdaExprNode
 
-    boundVarVals <- boundVarIdentifiers & length & takeNArgs
-    let localFreeVars = M.fromList (zip freeVarIdentifiers
+    boundVarVals <- boundVars & length & takeNArgs
+    let localFreeVars = M.fromList (zip freeVars
                                                (closure ^. closureFreeVars . getFreeVars))
-    let localBoundVars = M.fromList (zip boundVarIdentifiers
+    let localBoundVars = M.fromList (zip boundVars
                                                 boundVarVals)
     let localEnv = localFreeVars `M.union` localBoundVars
     code .= CodeEval evalExpr localEnv
@@ -424,7 +413,7 @@ stepCodeEnterIntoNonupdatableClosure closure = do
 
 -- | Return the variable if the continuation contains an alternative
 -- for it. 
-continuationGetVariableAlt :: Continuation -> Either StgError (CaseAlt Identifier)
+continuationGetVariableAlt :: Continuation -> Either StgError (CaseAlt VarName)
 continuationGetVariableAlt cont = 
   let vars = cont ^.. continuationAlts . each . _CaseAltVariable
   in
