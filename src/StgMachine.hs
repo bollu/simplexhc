@@ -197,7 +197,7 @@ data StgError =
 makeLenses ''ClosureFreeVars
 makePrisms ''Value
 makeLenses ''Closure
-makeLenses ''Code
+makePrisms ''Code
 makeLenses ''MachineState
 makeLenses ''Addr
 makeLenses ''Continuation
@@ -465,3 +465,15 @@ stepCodeReturnInt i = do
   alt <- (getEarlistAltWithPattern unwrapped_alts i ) `maybeToMachineT` (StgErrorNoMatchingAltPatternRawNumber i unwrapped_alts)
   code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
+
+
+
+
+genMachineTrace :: MachineState -> ([MachineState], Maybe StgError)
+genMachineTrace state = 
+  case runMachineT stepMachine state of
+      Left err -> ([], Just err)
+      Right (progress, state') -> if progress == MachineHalted
+                                 then ([state], Nothing)
+                                 else let (traceNext, err) = genMachineTrace state' in 
+                                      (state':traceNext, err)

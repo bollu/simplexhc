@@ -237,8 +237,11 @@ bindingp = do
 
 
 
-stgParser :: StgParser Program
-stgParser = sepEndBy1 bindingp semicolonp
+stgp :: StgParser Program
+stgp = sepEndBy1 bindingp semicolonp
 
 parseStg :: [Token] -> Either ParseError Program
-parseStg tokens = parse stgParser "(unknown)" tokens
+parseStg tokens = parse stgp "(unknown)" tokens
+
+parseExpr :: [Token] -> Either ParseError ExprNode
+parseExpr tokens = parse exprp "(unknown)" tokens

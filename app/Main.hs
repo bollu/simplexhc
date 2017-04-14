@@ -18,14 +18,6 @@ import Control.Monad
 -- v intercalate
 import Data.List
 
-genMachineTrace :: MachineState -> ([MachineState], Maybe StgError)
-genMachineTrace state = 
-  case runMachineT stepMachine state of
-      Left err -> ([], Just err)
-      Right (progress, state') -> if progress == MachineHalted
-                                 then ([state], Nothing)
-                                 else let (traceNext, err) = genMachineTrace state' in 
-                                      (state':traceNext, err)
 
 repl :: InputT IO ()
 repl = do 
