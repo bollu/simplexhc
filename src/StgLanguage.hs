@@ -21,6 +21,12 @@ mkNest = nest 4
 class Prettyable a where
     mkDoc :: a -> Doc
 
+instance Prettyable Int where
+  mkDoc = int
+
+instance Prettyable a => Prettyable [a] where
+  mkDoc xs = xs & fmap mkDoc & punctuate comma & hsep & parens
+
 instance (Prettyable a, Prettyable b) => Prettyable (a, b) where
   mkDoc (a, b) = braces (mkDoc a PP.<> comma PP.<> mkDoc b)
 
