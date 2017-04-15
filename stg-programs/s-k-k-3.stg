@@ -3,5 +3,5 @@ define s = {} \n {f, g, x} -> let
                                 define y = {} \n {} -> g {x} in
                               f {x, y};
 
-define main =  {} \n {} -> s {k, k, #3};
+define main =  {} \n {} -> s {k, k, 3#};
                           

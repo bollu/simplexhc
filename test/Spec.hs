@@ -12,15 +12,27 @@ import Data.Map.Lens
 import StgLanguage
 import StgParser
 import StgMachine
+import Text.ParserCombinators.Parsec
 
 
-parseStgExpr :: String -> Maybe ExprNode
-parseStgExpr str =  case (tokenize >=> parseExpr) $ str of 
-                      Left e -> Nothing
-                      Right expr -> Just expr
+runStgProgStr :: String -> Either ParseError (Either StgError MachineState)
+runStgProgStr str = runProgram <$> (parseStgStr str) where
+                  parseStgStr :: String -> Either ParseError Program
+                  parseStgStr = tokenize >=> parseStg
 
-mkBoxedNumber :: Int -> Maybe ExprNode
-mkBoxedNumber i = parseStgExpr $ "{} \n {} -> " ++ "#" ++ (show i) ++ " {}"
+                  runProgram :: Program -> Either StgError MachineState
+                  runProgram = compileProgram >=> genFinalMachineState
+
+assertFromStgString :: String -> (MachineState -> Assertion) -> Assertion
+assertFromStgString str f = case runStgProgStr str of
+                              Left parseErr -> assertFailure ("parse error: " ++ show parseErr)
+                              Right (Left stgErr) -> assertFailure ("runtime error: " ++ show stgErr)
+                              Right (Right state) -> f state
+
+
+
+mkBoxedNumberString :: Int -> String
+mkBoxedNumberString i = "Int { " ++  (show i) ++ "#" ++ "  }"
 
 extractBoxedNumber :: MachineState -> Maybe Int
 extractBoxedNumber state = (state ^. code ^? _CodeEval) >>= getFnApplication where
@@ -29,11 +41,19 @@ extractBoxedNumber state = (state ^. code ^? _CodeEval) >>= getFnApplication whe
   getFnApplication ((ExprNodeFnApplication varname []), localEnv) = (varname `M.lookup` localEnv) >>= (^? _ValuePrimInt) 
   getFnApplication _ = Nothing
 
+
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [interpTests]
+tests = testGroup "Tests" [scaffoldingTests, interpTests]
 
+scaffoldingTests = testGroup "Test scaffolding tests" [testBoxExtractRawNumber]
+
+testBoxExtractRawNumber = testCase 
+                          "Unwrap & wrap a boxed int" $ 
+                            assertFromStgString progStr (\ms -> 1 @?= 1)
+  where
+    progStr = ("define main = {} \\n {} -> " ++ mkBoxedNumberString 3 )
 
 interpTests = testGroup "interpreter tests" [testSKK3]
 

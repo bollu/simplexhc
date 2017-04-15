@@ -45,11 +45,11 @@ newtype RawNumber = RawNumber { _getRawNumber :: String }  deriving(Eq)
 makeLenses ''RawNumber
 
 
-instance Show RawNumber where
-  show rawnum = "rawnum:" ++ (rawnum ^. getRawNumber)
-
 instance Prettyable RawNumber where
-    mkDoc = text . show
+  mkDoc (RawNumber num) = mkStyleTag (text "rawnum:") PP.<> text num PP.<> text "#"
+
+instance Show RawNumber where
+    show = renderStyle showStyle . mkDoc
 
 data TokenType = TokenTypePlus | 
                  TokenTypeMinus | 
@@ -143,7 +143,9 @@ data Binding = Binding {
 type Program = [Binding]
 
 
-data Constructor = Constructor !ConstructorName ![Atom]
+data Constructor = Constructor { _constructorName :: !ConstructorName,
+                                 _constructorAtoms :: ![Atom]
+                               }
 
 instance Prettyable Constructor where
   mkDoc (Constructor name idents) = mkDoc name <+> (idents & map mkDoc & hsep)
@@ -175,7 +177,7 @@ instance Prettyable lhs => Prettyable (CaseAlt lhs) where
 instance Prettyable lhs => Show (CaseAlt lhs) where
     show = renderStyle showStyle . mkDoc
 
-data ConstructorPatternMatch = ConstructorPatternMatch ConstructorName [VarName]
+data ConstructorPatternMatch = ConstructorPatternMatch ConstructorName [VarName] deriving(Eq)
 
 instance Prettyable ConstructorPatternMatch where
   mkDoc (ConstructorPatternMatch consName vars) = 
@@ -233,6 +235,7 @@ makePrisms ''ExprNode
 makePrisms ''TokenType
 makePrisms ''CaseAltType
 makeLenses ''VarName
+makeLenses ''Constructor
 
 
 instance Prettyable ExprNode where
@@ -250,6 +253,9 @@ instance Prettyable ExprNode where
           (expr & mkDoc) where
                         letname = PP.text (if isrecursive == LetNonRecursive then "let" else "letrec")
                         bindingsstr = map mkDoc bindings & vcat
+
+
+    mkDoc (ExprNodeConstructor constructor) = mkDoc constructor
 
     mkDoc (ExprNodeRawNumber number) = mkDoc number
     mkDoc (ExprNodeCase caseexpr caseAlts) = text "case" <+> mkDoc caseexpr <+> text "of" <+> text "{" <+> (mkNest altsDoc)  <+> text "}" where

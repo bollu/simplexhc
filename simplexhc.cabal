@@ -56,6 +56,7 @@ test-suite simplexhc-test
                      , tasty-hunit
                      , lens
                      , containers
+                     , parsec
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 

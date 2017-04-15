@@ -20,8 +20,8 @@ varNameTokenizer = do
 
 numberTokenizer :: StgTokenizer TokenType
 numberTokenizer = do
-  hash <- char '#'
   number_str <- many1 digit
+  hash <- char '#'
   return $ TokenTypeRawNumber (RawNumber number_str)
 
 constructorTokenizer :: StgTokenizer TokenType
@@ -30,8 +30,8 @@ constructorTokenizer = do
   rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
   return $ TokenTypeConstructorName (ConstructorName (c:rest))
 
-alphanumericTokenizer :: StgTokenizer TokenType
-alphanumericTokenizer = do
+identifierLikeTokenizer :: StgTokenizer TokenType
+identifierLikeTokenizer = do
     var <- varNameTokenizer
     return $ case var ^. getVariable of
                 "define" -> TokenTypeDefine
@@ -64,9 +64,9 @@ glyphTokenizer = do
     let openParen = makeSymbolTokenizer "(" TokenTypeOpenParen
     let closeParen = makeSymbolTokenizer ")" TokenTypeCloseParen
     let comma = makeSymbolTokenizer "," TokenTypeComma
-    (try thinArrow <|> try fatArrow <|> try equals <|> try semicolon <|>
-     try openbrace <|> try closebrace <|> try comma <|>
-     try openParen <|> try closeParen)
+    (thinArrow <|> try fatArrow <|>  equals <|> semicolon <|>
+     openbrace <|> closebrace <|> comma <|>
+     openParen <|> closeParen)
     where
         makeSymbolTokenizer :: String -> TokenType -> StgTokenizer TokenType
         makeSymbolTokenizer str tokenType = fmap (const tokenType) (string str) 
@@ -74,7 +74,7 @@ glyphTokenizer = do
 
 tokenizer :: StgTokenizer Token
 tokenizer = do
-  tokenType <- numberTokenizer <|> constructorTokenizer <|> alphanumericTokenizer <|> glyphTokenizer <|> updatetokenizer
+  tokenType <-  constructorTokenizer <|> identifierLikeTokenizer <|> numberTokenizer <|> try glyphTokenizer <|> updatetokenizer
   sourcePos <- getPosition
   let trivia = Trivia sourcePos
   return $ Token tokenType trivia
@@ -119,8 +119,8 @@ bracesp :: StgParser a -> StgParser a
 bracesp = between (istoken (^? _TokenTypeOpenBrace)) (istoken (^? _TokenTypeCloseBrace))
 
 -- "{" atom1, atom2 .. atomn "}" | {}
-atomsp :: StgParser [Atom]
-atomsp = do
+atomListp :: StgParser [Atom]
+atomListp = do
     atoms <- bracesp (sepEndBy atomp  commap)
     return atoms
 
@@ -128,7 +128,7 @@ atomsp = do
 applicationp :: StgParser ExprNode
 applicationp = do
         fn_name <- varNamep
-        atoms <- atomsp
+        atoms <- atomListp
         return $ ExprNodeFnApplication fn_name atoms
 
 rawnumberp :: StgParser ExprNode
@@ -192,13 +192,22 @@ parenExprp = do
           istoken (^? _TokenTypeCloseParen)
           return expr
 
+constructorp :: StgParser ExprNode
+constructorp = do
+  consName <- istoken (^? _TokenTypeConstructorName)
+  params <- atomListp
+
+  return $ ExprNodeConstructor (Constructor consName params)
+
+
 exprp :: StgParser ExprNode
 exprp = try applicationp <|>
-        try letp <|>
+        letp <|>
+        constructorp <|>
         --  try caseConstructorp <|>
-        try caseRawNumberp <|>
-        try rawnumberp <|>
-        try parenExprp
+        caseRawNumberp <|>
+        rawnumberp <|>
+        parenExprp
 
 
 -- VarName list: {" id1 "," id2 "," .. idn "} | "{}"

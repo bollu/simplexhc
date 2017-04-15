@@ -67,7 +67,7 @@ data Value = ValueAddr Addr | ValuePrimInt Int
 
 instance Prettyable Value where
   mkDoc (ValueAddr addr) = mkStyleTag (text "val:") PP.<> mkDoc addr
-  mkDoc (ValuePrimInt int) = mkStyleTag (text "val:") PP.<> text "#" PP.<> text (show int)
+  mkDoc (ValuePrimInt int) = mkStyleTag (text "val:") PP.<> text (show int) PP.<> text "#" 
 
 instance Show Value where
     show = renderStyle showStyle . mkDoc
@@ -124,9 +124,9 @@ instance Prettyable Code where
   mkDoc (CodeEval expr env) = text "Eval" <+> braces (mkDoc expr) <+> text "|Local:" <+> braces(mkDoc env)
   mkDoc (CodeEnter addr) = text "Enter" <+> mkDoc addr
   mkDoc (CodeReturnConstructor cons values) = 
-    text "ReturnConstructor" <+> 
-    mkDoc cons <+> 
-    (values & map mkDoc & hsep)
+    text "ReturnConstructor" <+>  
+      (mkDoc (cons ^. constructorName) <+> 
+     (values & map mkDoc & punctuate comma & hsep & braces) & parens)
   mkDoc (CodeReturnInt i) = text "ReturnInt" <+> text (show i)
 
 
@@ -191,8 +191,12 @@ data StgError =
         StgErrorReturnStackEmpty |
         -- | `unwrapAlts` failed, unable to unwrap raw number
         StgErrorExpectedCaseAltRawNumber !CaseAltType | 
+        -- | `unwrapAlts` failed, unable to unwrap Constructor
+        StgErrorExpectedCaseAltConstructor Constructor !CaseAltType | 
         -- | 'xxx' failed, no matching pattern match found
-        StgErrorNoMatchingAltPatternRawNumber RawNumber [CaseAlt RawNumber] deriving(Show)
+        StgErrorNoMatchingAltPatternRawNumber RawNumber [CaseAlt RawNumber] |
+        -- | 'xxx' failed, no matching pattern match found
+        StgErrorNoMatchingAltPatternConstructor Constructor [CaseAlt ConstructorPatternMatch] deriving(Show)
 
 makeLenses ''ClosureFreeVars
 makePrisms ''Value
@@ -321,6 +325,26 @@ stepMachine = do
         CodeEval f local -> stepCodeEval local f
         CodeEnter addr -> stepCodeEnter addr
         CodeReturnInt i -> stepCodeReturnInt i
+        CodeReturnConstructor cons consvals -> stepCodeReturnConstructor cons consvals
+
+
+stepCodeReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
+stepCodeReturnConstructor cons values = do
+    returnStackEmpty <- use $ returnStack . to null
+    if returnStackEmpty then
+        return MachineHalted
+    else do
+      cont <- returnStackPop
+
+      let unwrapErr = StgErrorExpectedCaseAltConstructor cons
+      unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltConstructor  unwrapErr
+
+      let filterErr = StgErrorNoMatchingAltPatternConstructor cons unwrapped_alts
+      let consname = cons ^. constructorName
+      let pred (ConstructorPatternMatch name _) = name == consname
+      alt <- (filterEarliestAlt unwrapped_alts pred) `maybeToMachineT` filterErr
+      code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
+      return MachineStepped
 
 -- | 'CodeEval' execution
 stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT MachineProgress
@@ -330,6 +354,14 @@ stepCodeEval local expr = do
         ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet local  isReucursive bindings inExpr
         ExprNodeCase expr alts -> stepCodeEvalCase local expr alts
         ExprNodeRawNumber num -> stepCodeEvalRawNumber num
+        ExprNodeConstructor cons -> stepCodeEvalConstructor local cons
+
+
+stepCodeEvalConstructor :: LocalEnvironment -> Constructor -> MachineT MachineProgress
+stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
+    consVals <- for consAtoms (lookupAtom local)
+    code .= CodeReturnConstructor cons consVals
+    return MachineStepped
 
 stepCodeEvalFnApplication :: LocalEnvironment -> VarName -> [Atom] -> MachineT MachineProgress
 stepCodeEvalFnApplication local lhsName vars = do
@@ -451,18 +483,19 @@ unwrapAlts (a:as) p err = case a ^? p of
                                   return $ (a:as')
                       Nothing -> throwError (err a)
 
-getEarlistAltWithPattern :: Eq a => [CaseAlt a] -> a -> Maybe (CaseAlt a)
-getEarlistAltWithPattern [] _  = Nothing
-getEarlistAltWithPattern (c:cs) a = if c ^. caseAltLHS == a
+filterEarliestAlt :: Eq a => [CaseAlt a] -> (a -> Bool) -> Maybe (CaseAlt a)
+filterEarliestAlt [] _  = Nothing
+filterEarliestAlt (c:cs) pred = if pred (c ^. caseAltLHS)
                                     then Just c
-                                    else getEarlistAltWithPattern cs a
+                                    else filterEarliestAlt cs pred
 
 -- | codeReturnInt execution
 stepCodeReturnInt :: RawNumber -> MachineT MachineProgress
 stepCodeReturnInt i = do
   cont <- returnStackPop
   unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltRawNumber StgErrorExpectedCaseAltRawNumber
-  alt <- (getEarlistAltWithPattern unwrapped_alts i ) `maybeToMachineT` (StgErrorNoMatchingAltPatternRawNumber i unwrapped_alts)
+  let err = StgErrorNoMatchingAltPatternRawNumber i unwrapped_alts
+  alt <- (filterEarliestAlt unwrapped_alts (== i )) `maybeToMachineT`  err
   code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
 
@@ -477,3 +510,11 @@ genMachineTrace state =
                                  then ([state], Nothing)
                                  else let (traceNext, err) = genMachineTrace state' in 
                                       (state':traceNext, err)
+
+genFinalMachineState :: MachineState -> Either StgError MachineState
+genFinalMachineState state =
+    case runMachineT stepMachine state of
+      Left err -> Left err
+      Right (progress, state') -> if progress == MachineHalted
+                                    then Right state'
+                                    else genFinalMachineState state'
