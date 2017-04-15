@@ -230,25 +230,28 @@ runMachineT machineT state = let (mVal, machineState) = runState (runExceptT . u
                       Left err -> Left err
                       Right val -> Right (val, machineState)
 
+
+allocateBinding :: LocalEnvironment -> Binding -> MachineT (VarName, Addr)
+allocateBinding localenv binding =  do
+    let lambda = binding ^. bindingLambda
+    let name = binding ^. bindingName
+    addr <- (mkClosureFromLambda lambda localenv) >>= allocateClosureOnHeap
+    return (name, addr)
+
+-- allocate the bindings on the heap, and return the mapping
+-- between variable names to addresses
 compileProgram :: Program -> Either StgError MachineState
 compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineState)
-
   where
     setupBindings :: MachineT ()
     setupBindings = do 
-      for_ prog allocateBinding
+      let localenv = M.empty  -- when machine starts, no local env.
+      nameAddrPairs <- for prog (allocateBinding localenv) :: MachineT [(VarName, Addr)]
+      globalEnvironment .= M.fromList nameAddrPairs
+
       mainAddr <-  use globalEnvironment >>= (\x -> maybeToMachineT (x ^. at (VarName "main")) StgErrorUnableToFindMain) :: MachineT Addr
       -- NOTE: this is different from STG paper. Does this even work?
       code .= CodeEnter mainAddr
-    allocateBinding :: Binding -> MachineT ()
-    allocateBinding binding = do
-        let lambda = binding ^. bindingLambda
-        let name = binding ^. bindingName
-        -- FIXME: make local envirorment ReaderT? How does ReaderT interact with StateT?
-        -- FIXME: JIT the machine? :)
-        let localenv = M.empty  -- when machine starts, no local env.
-        addr <- (mkClosureFromLambda lambda localenv) >>= allocateClosureOnHeap
-        globalEnvironment %= ((at name) .~ Just addr )
 
 isExprPrimitive :: ExprNode -> Bool
 isExprPrimitive (ExprNodeRawNumber _) = True
@@ -328,6 +331,7 @@ stepMachine = do
         CodeReturnConstructor cons consvals -> stepCodeReturnConstructor cons consvals
 
 
+
 stepCodeReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeReturnConstructor cons values = do
     returnStackEmpty <- use $ returnStack . to null
@@ -342,8 +346,14 @@ stepCodeReturnConstructor cons values = do
       let filterErr = StgErrorNoMatchingAltPatternConstructor cons unwrapped_alts
       let consname = cons ^. constructorName
       let pred (ConstructorPatternMatch name _) = name == consname
-      alt <- (filterEarliestAlt unwrapped_alts pred) `maybeToMachineT` filterErr
-      code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
+
+      matchingAlt <- (filterEarliestAlt unwrapped_alts pred) `maybeToMachineT` filterErr
+      let (ConstructorPatternMatch _ varnames) = matchingAlt ^. caseAltLHS
+
+      -- assert ((length varnames) == (length values))
+      let newValuesMap = M.fromList (zip varnames values)
+      let modifiedEnv =  newValuesMap `M.union` (cont ^. continuationEnv)
+      code .= CodeEval (matchingAlt ^. caseAltRHS) modifiedEnv
       return MachineStepped
 
 -- | 'CodeEval' execution
@@ -378,16 +388,17 @@ stepCodeEvalFnApplication local lhsName vars = do
 
 
 stepCodeEvalLet :: LocalEnvironment -> IsLetRecursive -> [Binding] -> ExprNode -> MachineT MachineProgress
-stepCodeEvalLet local isLetRecursive bindings inExpr = do
-  let lookupEnv = local
-  closureNameAddrMap <- for bindings  (\b -> do
-                                              cls <- mkClosureFromLambda(b ^. bindingLambda) lookupEnv
-                                              addr <- allocateClosureOnHeap cls
-                                              return (b ^. bindingName, addr)
-                                      )
+stepCodeEvalLet locals isLetRecursive bindings inExpr = do
+  let lookupEnv = locals
+  closureNameAddrPairs <- for bindings (allocateBinding lookupEnv) :: MachineT [(VarName, Addr)]
 
-  let newlocal = foldl  (\local (name, addr) -> M.insert name (ValueAddr addr) local)  local closureNameAddrMap
-  code .= CodeEval inExpr newlocal
+  let closureNameValuePairs = closureNameAddrPairs & traverse . _2 %~ ValueAddr
+
+  -- TODO: rewrite with M.union
+  let newLocals = M.fromList closureNameValuePairs
+  let updatedLocals = newLocals `M.union` locals
+  -- let updatedLocals = foldl  (\local (name, addr) -> M.insert name (ValueAddr addr) local)  local closureNameAddrMap
+  code .= CodeEval inExpr updatedLocals
   return MachineStepped
 
 
