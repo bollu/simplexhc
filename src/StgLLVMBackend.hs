@@ -26,39 +26,11 @@ import LLVM.Context
 
 import Control.Monad.Except
 
--- writeStgToFile :: Program -> FilePath -> IO ()
--- writeStgToFile program path = Module.writeLLVMAssemblyToFile mod (Module.File path) where
---  mod = mkModule . mkSTGDefinitions $ prog
-
 type IRString = String
+
 getStgString :: Program -> IO (Either String IRString)
 getStgString program = withContext $ \context -> runExceptT (Module.withModuleFromAST context mod Module.moduleLLVMAssembly) where
   mod = mkModule . mkSTGDefinitions $ program
-
-{-
-
-mkDefinitions :: Free Lang () -> [AST.Definition]
-mkDefinitions lang = [AST.GlobalDefinition (G.Function {
-                    G.linkage=External,
-                    G.visibility=Default,
-                    G.dllStorageClass=Nothing,
-                    G.callingConvention=CC.C,
-                    G.returnAttributes=[],
-                    G.functionAttributes=[],
-                    G.section= Nothing,
-                    G.comdat= Nothing,
-                    G.alignment=0,
-                    G.garbageCollectorName=Nothing,
-                    G.prefix=Nothing,
-                    G.personalityFunction=Nothing,
-                    -- interesting stuff
-                    G.returnType=i64,
-                    G.name=AST.Name("main"),
-                    G.basicBlocks=[mkBB lang],
-                    G.parameters=([], False)
-                  })]
-
--}
 
 mkModule :: [AST.Definition] ->  AST.Module
 mkModule defs = AST.Module {
