@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module StgParser where
 import StgLanguage
@@ -10,14 +11,28 @@ import Control.Monad (void)
 import Text.Megaparsec.Char
 -- import Text.Megaparsec.String
 import Text.Megaparsec as P
+import Text.Megaparsec.Pos as P.Pos
 import Text.Megaparsec.Expr
+import Data.Set as Set
+import Data.List.NonEmpty
 import qualified Text.Megaparsec.Lexer as L
 
 import Control.Lens
 import Control.Monad.Error.Hoist
 
 type StgTokenizer a = Parsec Dec String a
-type StgParser a = Parsec Dec StgLanguage.Token a
+
+newtype StgTokenStream = StgTokenStream [StgLanguage.Token]
+
+instance  P.Stream StgTokenStream where
+  type Token StgTokenStream = StgLanguage.Token
+
+  uncons (StgTokenStream []) = Nothing
+  uncons (StgTokenStream (x:xs)) = Just (x, StgTokenStream xs)
+
+  updatePos _ _ current tok = (current, current)
+
+type StgParser a = Parsec Dec StgTokenStream a
 
 sc :: StgTokenizer () -- ‘sc’ stands for “space consumer”
 sc = L.space (void spaceChar) lineComment blockComment
@@ -100,9 +115,14 @@ tokenize input = P.runParser (sc *> many (tokenizer <* sc)) "tokenizer" input
 -- Tokens lifted to parsers
 
 istoken :: (TokenType -> Maybe a) -> StgParser a
-stoken pred = token nextpos acceptor where
-  nextpos _ token _ = token ^. tokenTrivia . triviaSourcePos
-  acceptor token =  maybeToEither (Message "Unexpected token, replace with real error")  (token ^. tokenType & pred)
+istoken pred = token test Nothing where
+  test x = case pred (_tokenType x) of
+             Just a -> Right a
+             Nothing -> Left (Set.singleton (Tokens (x:|[])), Set.empty, Set.empty)
+
+  nextpos :: Int -> SourcePos -> StgLanguage.Token -> SourcePos
+  nextpos _ pos _ = pos -- HACK: need to fix this
+
 
 varNamep :: StgParser VarName
 varNamep = istoken (^? _TokenTypeVarName)
@@ -267,8 +287,8 @@ stgp = sepEndBy1 definep semicolonp where
                 istoken (^? _TokenTypeDefine)
                 bindingp
 
-parseStg :: [StgLanguage.Token] -> _
-parseStg tokens = P.runParser stgp "parserStgProgram" tokens
+parseStg :: [StgLanguage.Token] -> Either (ParseError StgLanguage.Token Dec) Program
+parseStg tokens = P.runParser stgp "parserStgProgram" (StgTokenStream tokens)
 
-parseExpr :: [StgLanguage.Token] -> Either (ParseError Char Dec) ExprNode
-parseExpr tokens = P.runParser exprp "parserStgExpr" tokens
+parseExpr :: [StgLanguage.Token] -> Either (ParseError (P.Token StgTokenStream) Dec) ExprNode
+parseExpr tokens = P.runParser exprp "parserStgExpr" (StgTokenStream tokens)

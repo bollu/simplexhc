@@ -14,17 +14,26 @@ import Control.Monad.Trans.Class
 import Control.Lens
 import Control.Exception
 import Control.Monad
--- for ParseError
-import Text.ParserCombinators.Parsec
 
--- v intercalate
+import qualified Text.Megaparsec as P
+
 import Data.List
-
-compileString :: String -> Either ParseError (Either StgError MachineState)
-compileString str = compileProgram <$> (tokenize >=> parseStg $ str)
-
-
 type ErrorString = String
+
+stringifyMegaparsecError :: (Ord a, P.ShowToken a) => Either (P.ParseError a P.Dec) b -> Either ErrorString b
+stringifyMegaparsecError e = case e of 
+                               Left err -> Left (P.parseErrorPretty err)
+                               Right a -> Right a 
+
+compileString :: String -> Either ErrorString (Either StgError MachineState)
+compileString str = let
+    mTokens :: Either ErrorString [Token]
+    mTokens = stringifyMegaparsecError (tokenize str)
+    mParsed :: Either ErrorString Program 
+    mParsed = mTokens >>= stringifyMegaparsecError . parseStg
+  in
+    compileProgram <$> mParsed
+
 
 tryCompileString :: String -> Either ErrorString MachineState
 tryCompileString str = 

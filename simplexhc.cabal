@@ -18,7 +18,7 @@ library
   exposed-modules:     StgLanguage,
                        StgParser,
                        StgMachine,
-                       ColorUtils
+                       ColorUtils,
                        StgLLVMBackend
 
   build-depends:       base >= 4.7 && <= 5,
@@ -26,7 +26,7 @@ library
                        transformers,
                        containers,
                        parsec,
-                       megaparsec,
+                       megaparsec >= 5.2.0,
                        MissingH,
                        mtl,
                        pretty,

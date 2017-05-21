@@ -1,12 +1,16 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE InstanceSigs #-}
+
 module StgLanguage where
 
 import Control.Monad.Trans.Class
 import Control.Lens
-import Text.ParserCombinators.Parsec
 import Text.PrettyPrint as PP
 import ColorUtils
+import qualified Data.List.NonEmpty as NE
+import qualified Text.Megaparsec as P
+import qualified Text.Megaparsec.Pos as P.Pos
 
 showStyle :: PP.Style
 showStyle = PP.Style {
@@ -30,7 +34,7 @@ instance Prettyable a => Prettyable [a] where
 instance (Prettyable a, Prettyable b) => Prettyable (a, b) where
   mkDoc (a, b) = braces (mkDoc a PP.<> comma PP.<> mkDoc b)
 
-newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq)
+newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq, Ord)
 makeLenses ''ConstructorName
 
 instance Show ConstructorName where
@@ -47,7 +51,7 @@ instance Prettyable VarName where
 instance Show VarName where
     show = renderStyle showStyle . mkDoc
 
-newtype RawNumber = RawNumber { _getRawNumber :: String }  deriving(Eq)
+newtype RawNumber = RawNumber { _getRawNumber :: String }  deriving(Eq, Ord)
 makeLenses ''RawNumber
 
 
@@ -81,7 +85,7 @@ data TokenType = TokenTypePlus |
                  TokenTypeCloseParen |
                  TokenTypeComma |
                  TokenTypeEquals | 
-                 TokenTypeRawNumber !RawNumber
+                 TokenTypeRawNumber !RawNumber deriving(Eq, Ord)
 
 
 instance Show TokenType where
@@ -115,7 +119,10 @@ instance Prettyable TokenType where
   
 data Token = Token {
   _tokenType :: !TokenType
-}
+  -- HACK: for now, remove this and just use semi valid position given by the function
+  -- in updatePos.
+  -- , _tokenPos :: (P.Pos.SourcePos, P.Pos.SourcePos)
+} deriving(Eq, Ord)
 
 
 instance Prettyable Token where
@@ -124,6 +131,9 @@ instance Prettyable Token where
 instance (Show Token) where
     show = renderStyle showStyle . mkDoc
 
+instance P.ShowToken Token where
+    showTokens :: NE.NonEmpty Token -> String
+    showTokens xs = renderStyle showStyle (hcat (fmap mkDoc (NE.toList xs)))
 
 
 data Atom = AtomRawNumber !RawNumber | AtomVarName !VarName deriving(Show)
