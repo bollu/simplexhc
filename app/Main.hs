@@ -38,7 +38,7 @@ compileString str = let
 tryCompileString :: String -> Either ErrorString MachineState
 tryCompileString str = 
     case compileString str of
-      (Left parseErr) -> Left $ "pre-compile error:\n" ++ show parseErr
+      (Left parseErr) -> Left $ "pre-compile error:\n" ++ parseErr
       (Right (Left compileErr)) -> Left $ "compile error:\n" ++ show compileErr
       (Right (Right initState)) -> Right initState
 
@@ -59,7 +59,7 @@ repl = do
       let mInitState = tryCompileString line
       let mTrace = fmap genMachineTrace mInitState
       case mTrace of
-          (Left err) -> putStr err
+          (Left err) -> putStrLn err
           (Right trace) -> putStr . getTraceString $ trace
 
 getTraceString :: ([MachineState], Maybe StgError) -> String

@@ -3,6 +3,9 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeFamilies #-}
 
+-- http://lpaste.net/355742
+-- c_wraith's notes on how to use custom token types.
+
 module StgParser where
 import StgLanguage
 
