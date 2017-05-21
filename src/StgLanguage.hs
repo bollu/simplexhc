@@ -113,23 +113,13 @@ instance Show TokenType where
 instance Prettyable TokenType where
     mkDoc = text . show
   
-data Trivia = Trivia {
-  _triviaSourcePos :: SourcePos
-} deriving(Show)
-
-makeLenses ''Trivia
-
 data Token = Token {
-  _tokenType :: !TokenType,
-  _tokenTrivia :: !Trivia
+  _tokenType :: !TokenType
 }
 
 
 instance Prettyable Token where
-    mkDoc (Token{..}) = (mkDoc _tokenType)  <+> lparen <> linedoc <> colon <> coldoc <> rparen
-                where
-                    linedoc = _tokenTrivia ^. triviaSourcePos . to sourceLine . to int
-                    coldoc =  _tokenTrivia ^. triviaSourcePos . to sourceColumn . to int
+    mkDoc (Token{..}) = (mkDoc _tokenType) 
 
 instance (Show Token) where
     show = renderStyle showStyle . mkDoc

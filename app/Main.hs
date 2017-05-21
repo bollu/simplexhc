@@ -69,7 +69,7 @@ runFile fpath = do
     case trace of
           (Left compileErr) -> do  
                                       putStrLn "compile error: "
-                                      putStrLn . show $ compileErr
+                                      putStrLn  $ compileErr
           (Right trace) -> do
             putStr . getTraceString $ trace
             

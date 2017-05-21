@@ -23,6 +23,9 @@ import LLVM.AST.Attribute
 import LLVM.Target
 import LLVM.Context
 
+-- implement serialisation routines for things like enum tags, etc.
+import StgMachine
+
 
 import Control.Monad.Except
 
@@ -44,3 +47,13 @@ mkModule defs = AST.Module {
 
 mkSTGDefinitions :: Program -> [AST.Definition]
 mkSTGDefinitions p = []
+
+
+-- |Tag a value
+data ValueTag = ValueTagInt | ValueTagFloat deriving(Show)
+
+-- |Convert a value tag to an integer
+valueTagToInt :: ValueTag -> Int
+valueTagToInt (ValueTagInt) = 0
+valueTagToInt (ValueTagFloat) = 1
+

@@ -4,30 +4,48 @@
 
 module StgParser where
 import StgLanguage
-import Text.ParserCombinators.Parsec
-import Text.Parsec.Combinator
+
+import Control.Monad (void)
+
+import Text.Megaparsec.Char
+-- import Text.Megaparsec.String
+import Text.Megaparsec as P
+import Text.Megaparsec.Expr
+import qualified Text.Megaparsec.Lexer as L
+
 import Control.Lens
 import Control.Monad.Error.Hoist
 
-type StgTokenizer a = GenParser Char () a 
-type StgParser a = GenParser Token () a
+type StgTokenizer a = Parsec Dec String a
+type StgParser a = Parsec Dec StgLanguage.Token a
+
+sc :: StgTokenizer () -- ‘sc’ stands for “space consumer”
+sc = L.space (void spaceChar) lineComment blockComment
+  where lineComment  = L.skipLineComment "//"
+        blockComment = L.skipBlockComment "/*" "*/"
+
+lexeme :: StgTokenizer a -> StgTokenizer a
+lexeme = L.lexeme sc
+
+symbol :: String -> StgTokenizer String
+symbol = L.symbol sc
 
 varNameTokenizer :: StgTokenizer VarName
-varNameTokenizer = do
-    c <- lower
-    rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
+varNameTokenizer = lexeme $ do
+    c <- lowerChar
+    rest <- many (alphaNumChar <|> oneOf ['_', '-', '?'])
     return $ VarName (c:rest)
 
 numberTokenizer :: StgTokenizer TokenType
-numberTokenizer = do
-  number_str <- many1 digit
+numberTokenizer = lexeme $ do
+  number <- lexeme L.integer
   hash <- char '#'
-  return $ TokenTypeRawNumber (RawNumber number_str)
+  return $ TokenTypeRawNumber (RawNumber . show $ number)
 
 constructorTokenizer :: StgTokenizer TokenType
-constructorTokenizer = do
-  c <- upper
-  rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
+constructorTokenizer = lexeme $ do
+  c <- upperChar
+  rest <- many (alphaNumChar <|> oneOf ['_', '-', '?'])
   return $ TokenTypeConstructorName (ConstructorName (c:rest))
 
 identifierLikeTokenizer :: StgTokenizer TokenType
@@ -57,8 +75,8 @@ glyphTokenizer :: StgTokenizer TokenType
 glyphTokenizer = do
     let thinArrow = makeSymbolTokenizer "->" TokenTypeThinArrow
     let fatArrow = makeSymbolTokenizer "=>" TokenTypeFatArrow
-    let semicolon = makeSymbolTokenizer ";" TokenTypeSemicolon
     let equals = makeSymbolTokenizer "=" TokenTypeEquals
+    let semicolon = makeSymbolTokenizer ";" TokenTypeSemicolon
     let openbrace = makeSymbolTokenizer "{" TokenTypeOpenBrace
     let closebrace = makeSymbolTokenizer "}" TokenTypeCloseBrace
     let openParen = makeSymbolTokenizer "(" TokenTypeOpenParen
@@ -72,23 +90,19 @@ glyphTokenizer = do
         makeSymbolTokenizer str tokenType = fmap (const tokenType) (string str) 
 
 
-tokenizer :: StgTokenizer Token
-tokenizer = do
-  tokenType <-  constructorTokenizer <|> identifierLikeTokenizer <|> numberTokenizer <|> try glyphTokenizer <|> updatetokenizer
-  sourcePos <- getPosition
-  let trivia = Trivia sourcePos
-  return $ Token tokenType trivia
+tokenizer :: StgTokenizer StgLanguage.Token
+tokenizer = StgLanguage.Token <$> (constructorTokenizer <|> identifierLikeTokenizer <|> numberTokenizer <|> try glyphTokenizer <|> updatetokenizer)
 
-tokenize :: [Char] -> Either ParseError [Token]
-tokenize input = parse (many (tokenizer <* spaces)) "tokenizer" input
+tokenize :: String -> Either (ParseError Char Dec) [StgLanguage.Token]
+tokenize input = P.runParser (sc *> many (tokenizer <* sc)) "tokenizer" input
 
 
 -- Tokens lifted to parsers
 
 istoken :: (TokenType -> Maybe a) -> StgParser a
-istoken pred = tokenPrim show nextpos acceptor where
+stoken pred = token nextpos acceptor where
   nextpos _ token _ = token ^. tokenTrivia . triviaSourcePos
-  acceptor token =  token ^. tokenType & pred
+  acceptor token =  maybeToEither (Message "Unexpected token, replace with real error")  (token ^. tokenType & pred)
 
 varNamep :: StgParser VarName
 varNamep = istoken (^? _TokenTypeVarName)
@@ -201,10 +215,11 @@ constructorp = do
 
 
 exprp :: StgParser ExprNode
-exprp = try applicationp <|>
+exprp = applicationp <|>
         letp <|>
         constructorp <|>
-        --  try caseConstructorp <|>
+        -- FIXME: factor out "try" into a separate thing
+        (try caseConstructorp) <|>
         caseRawNumberp <|>
         rawnumberp <|>
         parenExprp
@@ -235,10 +250,10 @@ lambdap = do
     }
 
 
--- define <name> = <lambdaform>
+--  <name> = <lambdaform>
 bindingp :: StgParser Binding
 bindingp = do
-  istoken (^? _TokenTypeDefine)
+  -- istoken (^? _TokenTypeDefine)
   name <- varNamep
   istoken (^? _TokenTypeEquals)
   lambda <- lambdap
@@ -247,10 +262,13 @@ bindingp = do
 
 
 stgp :: StgParser Program
-stgp = sepEndBy1 bindingp semicolonp
+stgp = sepEndBy1 definep semicolonp where
+    definep = do
+                istoken (^? _TokenTypeDefine)
+                bindingp
 
-parseStg :: [Token] -> Either ParseError Program
-parseStg tokens = parse stgp "(unknown)" tokens
+parseStg :: [StgLanguage.Token] -> _
+parseStg tokens = P.runParser stgp "parserStgProgram" tokens
 
-parseExpr :: [Token] -> Either ParseError ExprNode
-parseExpr tokens = parse exprp "(unknown)" tokens
+parseExpr :: [StgLanguage.Token] -> Either (ParseError Char Dec) ExprNode
+parseExpr tokens = P.runParser exprp "parserStgExpr" tokens
