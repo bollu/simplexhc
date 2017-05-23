@@ -6,6 +6,7 @@ module Main where
 import StgLanguage
 import StgParser
 import StgMachine
+import StgLLVMBackend
 
 import System.IO
 import System.Environment
@@ -25,23 +26,28 @@ stringifyMegaparsecError e = case e of
                                Left err -> Left (P.parseErrorPretty err)
                                Right a -> Right a 
 
-compileString :: String -> Either ErrorString (Either StgError MachineState)
-compileString str = let
-    mTokens :: Either ErrorString [Token]
-    mTokens = stringifyMegaparsecError (tokenize str)
-    mParsed :: Either ErrorString Program 
-    mParsed = mTokens >>= stringifyMegaparsecError . parseStg
-  in
-    compileProgram <$> mParsed
-
-
-tryCompileString :: String -> Either ErrorString MachineState
-tryCompileString str = 
-    case compileString str of
+squashFrontendErrors :: Either ErrorString (Either StgError a) -> Either ErrorString a
+squashFrontendErrors val = 
+    case val of
       (Left parseErr) -> Left $ "pre-compile error:\n" ++ parseErr
       (Right (Left compileErr)) -> Left $ "compile error:\n" ++ show compileErr
-      (Right (Right initState)) -> Right initState
+      (Right (Right a)) -> Right a
 
+parseString :: String -> Either ErrorString Program
+parseString str = let
+    mTokens :: Either ErrorString [Token]
+    mTokens = stringifyMegaparsecError (tokenize str)
+    mParsed :: Either ErrorString Program
+    mParsed = mTokens >>= stringifyMegaparsecError . parseStg
+  in
+    mParsed
+
+tryCompileString :: String -> Either ErrorString MachineState
+tryCompileString str =  squashFrontendErrors $ compileProgram <$> parseString str
+
+
+tryLLVMString :: String ->  IO (Either ErrorString IRString)
+tryLLVMString str = sequenceA $ getStgString <$> parseString str
 
 repl :: InputT IO ()
 repl = do 
@@ -56,6 +62,14 @@ repl = do
   where
     compileAndRun :: String -> IO ()
     compileAndRun line = do
+      putStrLn $ "LLVM:\n=====\n"
+      mLLVMStr <- tryLLVMString line
+      case mLLVMStr of
+        Left err -> putStrLn err
+        Right val -> putStrLn val
+
+
+      putStrLn "interp: "
       let mInitState = tryCompileString line
       let mTrace = fmap genMachineTrace mInitState
       case mTrace of
@@ -73,7 +87,16 @@ getTraceString (trace, mErr) =
 runFile :: String -> IO ()
 runFile fpath = do
     raw <- Prelude.readFile fpath
+    putStrLn $ "LLVM:\n=====\n"
+    mLLVMStr <- tryLLVMString raw
+    case mLLVMStr of
+      Left err -> putStrLn err
+      Right val -> putStrLn val
+
+
+    putStrLn "Interp:\n=====\n"
     let mInitState = tryCompileString raw
+    
     let trace = fmap genMachineTrace mInitState
     case trace of
           (Left compileErr) -> do  

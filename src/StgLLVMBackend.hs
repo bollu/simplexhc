@@ -22,6 +22,12 @@ import LLVM.AST.ThreadLocalStorage
 import LLVM.AST.Attribute
 import LLVM.Target
 import LLVM.Context
+import qualified Data.ByteString.Char8 as C8 (pack)
+import qualified Data.ByteString as B
+import qualified Data.ByteString.Short as B
+         (ShortByteString, toShort, fromShort)
+import Data.Char (chr)
+
 
 -- implement serialisation routines for things like enum tags, etc.
 import StgMachine
@@ -31,14 +37,21 @@ import Control.Monad.Except
 
 type IRString = String
 
-getStgString :: Program -> IO (Either String IRString)
-getStgString program = withContext $ \context -> runExceptT (Module.withModuleFromAST context mod Module.moduleLLVMAssembly) where
-  mod = mkModule . mkSTGDefinitions $ program
+bsToStr :: B.ByteString -> String
+bsToStr = map (chr . fromEnum) . B.unpack
+
+getStgString :: Program -> IO IRString
+getStgString program = 
+  bsToStr <$> (withContext $ 
+    \context -> 
+       (Module.withModuleFromAST context mod (Module.moduleLLVMAssembly)))
+      where
+        mod = mkModule . mkSTGDefinitions $ program
 
 mkModule :: [AST.Definition] ->  AST.Module
 mkModule defs = AST.Module {
-      AST.moduleName="simplexhc",
-      AST.moduleSourceFileName="simplexhc-thinair",
+      AST.moduleName=B.toShort . C8.pack  $ "simplexhc",
+      AST.moduleSourceFileName=B.toShort . C8.pack $ "simplexhc-thinair",
       AST.moduleDataLayout=Nothing,
       AST.moduleTargetTriple=Nothing,
       AST.moduleDefinitions=defs
