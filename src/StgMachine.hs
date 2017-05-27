@@ -238,6 +238,16 @@ allocateBinding localenv binding =  do
     addr <- (mkClosureFromLambda lambda localenv) >>= allocateClosureOnHeap
     return (name, addr)
 
+gVarNamesToIntIntrinsics :: M.Map VarName (Int -> Int -> Int)
+gVarNamesToIntIntrinsics = M.fromList $ [(VarName "iplus", (+))]
+
+-- HACK: I'm mapping intrinsics to negative addresses.
+-- Ideally, this should be cleaner but I really don't care right now
+-- mapIntrinsicsToAddrs :: MachineT ()
+-- mapIntrinsicsToAddrs = do
+--   for_ zip ([-1, -2,..](M.keys gVarNamesToIntIntrinsics) (\(i, name) -> globalEnvironment %= (at name) .~ Just i)
+
+
 -- allocate the bindings on the heap, and return the mapping
 -- between variable names to addresses
 compileProgram :: Program -> Either StgError MachineState
@@ -248,6 +258,7 @@ compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineSta
       let localenv = M.empty  -- when machine starts, no local env.
       nameAddrPairs <- for prog (allocateBinding localenv) :: MachineT [(VarName, Addr)]
       globalEnvironment .= M.fromList nameAddrPairs
+      -- Do I actually need this? mapIntrinsicsToAddrs
 
       mainAddr <-  use globalEnvironment >>= (\x -> maybeToMachineT (x ^. at (VarName "main")) StgErrorUnableToFindMain) :: MachineT Addr
       -- NOTE: this is different from STG paper. Does this even work?
@@ -373,17 +384,25 @@ stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
     code .= CodeReturnConstructor cons consVals
     return MachineStepped
 
+
+stepIntIntrinsic :: (Int -> Int -> Int) -> [Atom] -> MachineT  MachineProgress
+stepIntIntrinsic = undefined
+
 stepCodeEvalFnApplication :: LocalEnvironment -> VarName -> [Atom] -> MachineT MachineProgress
 stepCodeEvalFnApplication local lhsName vars = do
-     lhsValue <- lookupVariable local lhsName
-     -- it doesn't have the address of a function, don't continue
-     case lhsValue ^? _ValueAddr of
-        Nothing -> return MachineHalted
-        Just fnAddr ->  do
-               localVals <- for vars (lookupAtom local)
-               argumentStack `stackPushN` localVals
-               code .= CodeEnter fnAddr
-               return MachineStepped
+     case (M.lookup lhsName gVarNamesToIntIntrinsics) of
+       Just f -> stepIntIntrinsic f vars
+       -- we have no intrinsic, so do the usual lookup stuff
+       Nothing -> do
+        lhsValue <- lookupVariable local lhsName
+        -- it doesn't have the address of a function, don't continue
+        case lhsValue ^? _ValueAddr of
+            Nothing -> return MachineHalted
+            Just fnAddr ->  do
+                  localVals <- for vars (lookupAtom local)
+                  argumentStack `stackPushN` localVals
+                  code .= CodeEnter fnAddr
+                  return MachineStepped
 
 
 
@@ -509,9 +528,6 @@ stepCodeReturnInt i = do
   alt <- (filterEarliestAlt unwrapped_alts (== i )) `maybeToMachineT`  err
   code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
-
-
-
 
 genMachineTrace :: MachineState -> ([MachineState], Maybe StgError)
 genMachineTrace state = 
