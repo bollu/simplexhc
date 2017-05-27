@@ -1,4 +1,4 @@
-module StgLLVMBackend where
+module StgLLVMBackend(IRString, getStgString) where
 import StgLanguage
 import ColorUtils
 
@@ -27,6 +27,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Short as B
          (ShortByteString, toShort, fromShort)
 import Data.Char (chr)
+import qualified LoweringFFI as L
 
 
 -- implement serialisation routines for things like enum tags, etc.
@@ -39,6 +40,17 @@ type IRString = String
 
 bsToStr :: B.ByteString -> String
 bsToStr = map (chr . fromEnum) . B.unpack
+
+strToShort :: String -> B.ShortByteString
+strToShort = B.toShort . C8.pack
+
+strToName :: String -> AST.Name
+strToName = AST.Name . strToShort
+
+{-
+getStgString :: Program -> IO IRString
+getStgString _ = L.mkModule >>= L.getModuleString
+-}
 
 getStgString :: Program -> IO IRString
 getStgString program = 
@@ -57,10 +69,36 @@ mkModule defs = AST.Module {
       AST.moduleDefinitions=defs
   }
 
+-- mkBoxedThunk
+
+-- arg stack
+-- return stack
+-- global code
+-- heap
+
+-- eval
+-- enter
+
+i32ty :: Type
+i32ty = IntegerType 32
+
+data Code = CodeEval | CodeEnter deriving(Show, Enum)
+
+stgGlobalCode :: AST.Definition
+stgGlobalCode = AST.GlobalDefinition (G.globalVariableDefaults {
+    G.name=strToName "gCode",
+    G.type'=i32ty,
+    G.isConstant=False
+})
+
+continuationType :: Type
+continuationType = undefined
+
+stgPrelude :: [AST.Definition]
+stgPrelude = [stgGlobalCode]
 
 mkSTGDefinitions :: Program -> [AST.Definition]
-mkSTGDefinitions p = []
-
+mkSTGDefinitions p = stgPrelude ++ []
 
 -- |Tag a value
 data ValueTag = ValueTagInt | ValueTagFloat deriving(Show)
@@ -69,4 +107,5 @@ data ValueTag = ValueTagInt | ValueTagFloat deriving(Show)
 valueTagToInt :: ValueTag -> Int
 valueTagToInt (ValueTagInt) = 0
 valueTagToInt (ValueTagFloat) = 1
+
 
