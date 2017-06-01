@@ -1,3 +1,1 @@
-define main =  {} \n {} -> letrec 
-                            x = {} \u {} -> f {}
-                           in f {};
+define main =  {} \n {} -> K

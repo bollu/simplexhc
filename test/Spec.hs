@@ -12,22 +12,7 @@ import Data.Map.Lens
 import StgLanguage
 import StgParser
 import StgMachine
-import Text.ParserCombinators.Parsec
-
-
-runStgProgStr :: String -> Either ParseError (Either StgError MachineState)
-runStgProgStr str = runProgram <$> (parseStgStr str) where
-                  parseStgStr :: String -> Either ParseError Program
-                  parseStgStr = tokenize >=> parseStg
-
-                  runProgram :: Program -> Either StgError MachineState
-                  runProgram = compileProgram >=> genFinalMachineState
-
-assertFromStgString :: String -> (MachineState -> Assertion) -> Assertion
-assertFromStgString str f = case runStgProgStr str of
-                              Left parseErr -> assertFailure ("parse error: " ++ show parseErr)
-                              Right (Left stgErr) -> assertFailure ("runtime error: " ++ show stgErr)
-                              Right (Right state) -> f state
+import Stg
 
 
 
@@ -45,17 +30,17 @@ extractBoxedNumber state = (state ^. code ^? _CodeEval) >>= getFnApplication whe
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "Tests" [scaffoldingTests, interpTests]
+tests = testGroup "Tests" [runSamplesTest]
 
-scaffoldingTests = testGroup "Test scaffolding tests" [testBoxExtractRawNumber]
+runSamplesTest = testCase "running samples..." $ do
+    return ()
 
-testBoxExtractRawNumber = testCase 
-                          "Unwrap & wrap a boxed int" $ 
-                            assertFromStgString progStr (\ms -> 1 @?= 1)
-  where
-    progStr = ("define main = {} \\n {} -> " ++ mkBoxedNumberString 3 )
 
-interpTests = testGroup "interpreter tests" [testSKK3]
-
-testSKK3 = testCase "test S K K 3" $ [1, 2, 3] `compare` [1,2] @?= GT 
+doesStgProgramSucceedRun :: String -> Either ErrorString MachineState
+doesStgProgramSucceedRun s = 
+  case tryCompileString s of
+    Left err -> Left err
+    Right init -> case genMachineTrace init of
+                    (states, Nothing) -> Right (last states)
+                    (_, Just err) -> Left (show err)
 

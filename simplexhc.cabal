@@ -18,6 +18,7 @@ library
   exposed-modules:     StgLanguage,
                        StgParser,
                        StgMachine,
+                       Stg,
                        ColorUtils
                        -- StgLLVMBackend,
                        -- LoweringFFI
@@ -54,7 +55,6 @@ executable simplexhc
                      , transformers
                      , ansi-terminal
                      , bytestring
-                     , parsec
                      , megaparsec
   default-language:    Haskell2010
 
@@ -71,7 +71,8 @@ test-suite simplexhc-test
                      , tasty-hunit
                      , lens
                      , containers
-                     , parsec
+                     , megaparsec
+  default-language:    Haskell2010
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
