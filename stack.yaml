@@ -39,14 +39,15 @@ resolver: lts-8.15
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
-- '/Users/bollu/work/llvm-hs/llvm-hs'
-- '/Users/bollu/work/llvm-hs/llvm-hs-pure'
+  # - '/Users/bollu/work/llvm-hs/llvm-hs'
+  # - '/Users/bollu/work/llvm-hs/llvm-hs-pure'
 extra-deps:
 - hoist-error-0.1.0.2
 # - llvm-hs-4.1.0.0
 # - llvm-hs-pure-4.1.0.0
+
 resolver: lts-8.15
 
-flags:
-  llvm-hs:
-   shared-llvm: true
+# flags:
+# llvm-hs:
+#   shared-llvm: true

@@ -6,7 +6,7 @@ module Main where
 import StgLanguage
 import StgParser
 import StgMachine
-import StgLLVMBackend
+-- import StgLLVMBackend
 
 import System.IO
 import System.Environment
@@ -45,10 +45,6 @@ parseString str = let
 tryCompileString :: String -> Either ErrorString MachineState
 tryCompileString str =  squashFrontendErrors $ compileProgram <$> parseString str
 
-
-tryLLVMString :: String ->  IO (Either ErrorString IRString)
-tryLLVMString str = sequenceA $ getStgString <$> parseString str
-
 repl :: InputT IO ()
 repl = do 
     lift . putStrLn $ "\n"
@@ -62,12 +58,6 @@ repl = do
   where
     compileAndRun :: String -> IO ()
     compileAndRun line = do
-      putStrLn $ "LLVM:\n=====\n"
-      mLLVMStr <- tryLLVMString line
-      case mLLVMStr of
-        Left err -> putStrLn err
-        Right val -> putStrLn val
-
 
       putStrLn "interp: "
       let mInitState = tryCompileString line
@@ -87,13 +77,6 @@ getTraceString (trace, mErr) =
 runFile :: String -> IO ()
 runFile fpath = do
     raw <- Prelude.readFile fpath
-    putStrLn $ "LLVM:\n=====\n"
-    mLLVMStr <- tryLLVMString raw
-    case mLLVMStr of
-      Left err -> putStrLn err
-      Right val -> putStrLn val
-
-
     putStrLn "Interp:\n=====\n"
     let mInitState = tryCompileString raw
     

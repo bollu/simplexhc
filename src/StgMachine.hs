@@ -239,7 +239,7 @@ allocateBinding localenv binding =  do
     return (name, addr)
 
 gVarNamesToIntIntrinsics :: M.Map VarName (Int -> Int -> Int)
-gVarNamesToIntIntrinsics = M.fromList $ [(VarName "iplus", (+))]
+gVarNamesToIntIntrinsics = M.fromList $ [(VarName "plus#", (+))]
 
 -- HACK: I'm mapping intrinsics to negative addresses.
 -- Ideally, this should be cleaner but I really don't care right now
@@ -386,7 +386,13 @@ stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
 
 
 stepIntIntrinsic :: (Int -> Int -> Int) -> [Atom] -> MachineT  MachineProgress
-stepIntIntrinsic = undefined
+stepIntIntrinsic f atoms = do
+    -- make sure the function call looks like this
+    let [AtomRawNumber (RawNumber x1str), AtomRawNumber (RawNumber x2str)] = atoms
+    -- HACK: ewwww. convert these to actual godforsaken int.
+    code .= CodeReturnInt (RawNumber ((show (f (read x1str) (read x2str)))))
+    return MachineStepped
+
 
 stepCodeEvalFnApplication :: LocalEnvironment -> VarName -> [Atom] -> MachineT MachineProgress
 stepCodeEvalFnApplication local lhsName vars = do
