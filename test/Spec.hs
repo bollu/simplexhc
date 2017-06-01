@@ -2,9 +2,14 @@ import Test.Tasty
 import Control.Monad
 -- import Test.Tasty.QuickCheck as QC
 import Test.Tasty.HUnit
+import Test.Tasty.Runners
+
 
 import Data.Ord
-import Data.Map as M
+import qualified Data.Map as M
+
+import System.IO
+
 
 import Control.Lens
 import Data.Map.Lens
@@ -13,6 +18,10 @@ import StgLanguage
 import StgParser
 import StgMachine
 import Stg
+
+import System.Directory
+import Data.Either
+
 
 
 
@@ -32,8 +41,60 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Tests" [runSamplesTest]
 
-runSamplesTest = testCase "running samples..." $ do
-    return ()
+
+{-
+
+stgProgramsResource :: ResourceSpec [(FilePath, String)]
+stgProgramsResource = ResourceSpec (acquirer, releaser) where
+    acquirer = do
+      programFiles <- listDirectory "./stg-programs/"
+      forM programFiles (\f -> do 
+                                          contents <- readFile $ "./stg-programs/" ++ f
+                                          return (f, contents)
+                                 )
+    
+    releaser = const (return ())
+
+createStgProgramTestCase :: (FilePath, String) -> TestTree
+createStgProgramTestCase (path, program) = testCase path assertion
+    let mState = doesStgProgramSucceedRun contents
+    in
+    assertion = if isLeft mState 
+                then do
+                    putStr "\n"
+                    putStrLn ("File: " ++ path)
+                    putStrLn "Error: "
+                    putStr err
+                    assertFailure "execution failed."
+                else do
+                  putrStrLn $ path ++ " ran successfully"
+
+
+runSamplesTest :: TestTree
+runSamplesTest = WithResource stgProgramsResource 
+
+-}
+
+runSamplesTest :: TestTree
+runSamplesTest = testCase  "running samples" $ do
+    programFiles <- listDirectory "./stg-programs/"
+    mRuns <- forM programFiles (\f -> do 
+                                        contents <- readFile $ "./stg-programs/" ++ f
+                                        let mState = doesStgProgramSucceedRun contents
+                                        return (f, mState)) :: IO [(FilePath, Either ErrorString MachineState)]
+    let mErrors = filter (isLeft . snd)  mRuns
+
+    if length mErrors == 0 then
+      return ()
+    else do
+      forM_ mErrors (\(f, Left err) -> do
+          putStr "\n"
+          putStrLn ("file: " ++ f)
+          putStrLn "error: "
+          putStr err)
+
+      assertFailure "program executions failed"
+
 
 
 doesStgProgramSucceedRun :: String -> Either ErrorString MachineState
