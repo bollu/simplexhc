@@ -51,8 +51,12 @@ symbol = L.symbol sc
 varNameTokenizer :: StgTokenizer VarName
 varNameTokenizer = lexeme $ do
     c <- lowerChar
-    rest <- many (alphaNumChar <|> oneOf ['_', '-', '?'])
-    return $ VarName (c:rest)
+    rest <- many (alphaNumChar <|> oneOf ['_', '-'])
+    possibly_end <- optional (oneOf ['?', '#'])
+    return $ VarName $ 
+      case possibly_end of 
+                Just end -> (c:rest) ++ [end]
+                Nothing -> (c:rest)
 
 numberTokenizer :: StgTokenizer TokenType
 numberTokenizer = lexeme $ do
@@ -196,17 +200,6 @@ caseConstructorAltp = do
   
   return $ CaseAltConstructor (CaseAlt patternMatch rhs)
 
-  
-
-caseConstructorp :: StgParser ExprNode
-caseConstructorp = do
-  istoken (^? _TokenTypeCase)
-  e <- exprp
-  istoken (^? _TokenTypeOf)
-  alts <- sepEndBy1 caseConstructorAltp semicolonp
-  return $ ExprNodeCase e alts
-
-
 caseRawNumberAltp :: StgParser CaseAltType
 caseRawNumberAltp = do
   num <- istoken (^? _TokenTypeRawNumber)
@@ -214,13 +207,17 @@ caseRawNumberAltp = do
   rhs <- exprp
   return $ CaseAltRawNumber (CaseAlt num rhs)
 
-caseRawNumberp :: StgParser ExprNode
-caseRawNumberp = do
+caseAltp :: StgParser CaseAltType
+caseAltp = caseConstructorAltp <|> caseRawNumberAltp
+
+casep :: StgParser ExprNode
+casep = do
   istoken (^? _TokenTypeCase)
-  num <- rawnumberp
+  e <- exprp
   istoken (^? _TokenTypeOf)
-  alts <- sepEndBy1 caseRawNumberAltp semicolonp
-  return $ ExprNodeCase num alts
+  alts <- sepEndBy1 caseAltp semicolonp
+  return $ ExprNodeCase e alts
+
 
 parenExprp :: StgParser ExprNode
 parenExprp = do
@@ -242,8 +239,7 @@ exprp = applicationp <|>
         letp <|>
         constructorp <|>
         -- FIXME: factor out "try" into a separate thing
-        (try caseConstructorp) <|>
-        caseRawNumberp <|>
+        casep <|>
         rawnumberp <|>
         parenExprp
 
