@@ -223,7 +223,7 @@ data Lambda = Lambda {
 instance Prettyable Lambda where
     mkDoc (Lambda{..}) = 
         freedoc <+> updatedoc <+>
-        bounddoc <+> text "->" $$
+        bounddoc <+> text "->" <+>
         (mkDoc _lambdaExprNode) where
             freedoc = (map mkDoc _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
             bounddoc = (map mkDoc _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
@@ -254,7 +254,7 @@ instance Prettyable ExprNode where
                                              (mkDoc eleft) <+>
                                              (mkDoc eright)
     mkDoc (ExprNodeLet isrecursive bindings expr) = 
-          letname $$
+          letname <+>
           bindingsstr $$ 
           (text "in")  $$
           (expr & mkDoc) where
@@ -273,7 +273,7 @@ instance Show ExprNode where
 
 
 instance Prettyable Binding where
-    mkDoc (Binding{..}) = (PP.text "define") <+>
+    mkDoc (Binding{..}) = 
                          (mkDoc _bindingName) <+> equals <+>
                          (_bindingLambda & mkDoc)
 

@@ -8,7 +8,7 @@ styleAddr = zeroWidthText (setSGRCode [SetColor Foreground Vivid Green, SetUnder
 
 
 styleTag :: Doc
-styleTag = zeroWidthText (setSGRCode [SetColor Foreground Vivid White, SetConsoleIntensity BoldIntensity])
+styleTag = zeroWidthText (setSGRCode [SetUnderlining SingleUnderline])
 
 mkStyleTag :: Doc -> Doc
 mkStyleTag tag = styleTag <> tag <> styleReset

@@ -104,8 +104,11 @@ data Closure = Closure {
 
 instance Prettyable Closure where
   mkDoc (Closure{..}) = (mkStyleTag (text "cls:<<"))
-                         <+> mkDoc _closureLambda $$
-                         text "| env: " <+> mkDoc  _closureFreeVars <+> (mkStyleTag (text ">>"))
+                         <+> mkDoc _closureLambda PP.<> envdoc <+> mkStyleTag(text ">>") where
+            envdoc = if length ( _getFreeVars ( _closureFreeVars)) == 0
+                    then text ""
+                    else text "| env: " <+> mkDoc  _closureFreeVars <+> mkStyleTag (text ">>")
+                        
 
 
 type LocalEnvironment = M.Map VarName Value
@@ -130,7 +133,13 @@ instance Prettyable Code where
   mkDoc (CodeReturnInt i) = text "ReturnInt" <+> text (show i)
 
 
+newtype Log = Log { unLog :: [Doc] } deriving(Monoid)
 
+instance Prettyable Log where
+    mkDoc (Log ls) = fmap (\l -> text (">>") <+> l) ls & vcat
+
+instance Show Log where
+    show = renderStyle showStyle . mkDoc
 
 data MachineState = MachineState {
     _argumentStack :: !ArgumentStack,
@@ -138,18 +147,21 @@ data MachineState = MachineState {
     _updateStack :: !UpdateStack,
     _heap :: !Heap,
     _globalEnvironment :: !GlobalEnvironment,
-    _code :: !Code
+    _code :: !Code,
+    _currentLog :: !Log,
+    _oldLog :: !Log
 }
 
 
 instance Prettyable MachineState where
   mkDoc MachineState{..} = 
-   heading (text "*** Code:") $$ code $+$
-   heading (text "*** Args:") $$ argsDoc $+$
-   heading (text "*** Return:") $$ returnDoc $+$
-   heading (text "*** Update:") $$ updateDoc $+$
-   heading (text "*** Heap:") $$ heapDoc $+$
-   heading (text "*** Env:") $$ globalEnvDoc $+$
+   heading (text "@@@ Steps to reach state:") $$ currentLogDoc $+$
+   heading (text "@@@ Code:") $$ code $+$
+   heading (text "@@@ Args:") $$ argsDoc $+$
+   heading (text "@@@ Return:") $$ returnDoc $+$
+   heading (text "@@@ Update:") $$ updateDoc $+$
+   heading (text "@@@ Heap:") $$ heapDoc $+$
+   heading (text "@@@ Env:") $$ globalEnvDoc $+$
    heading (text "---") where
     argsDoc = _argumentStack & mkDoc
     returnDoc = _returnStack & mkDoc
@@ -157,6 +169,7 @@ instance Prettyable MachineState where
     heapDoc = _heap & mkDoc
     globalEnvDoc = _globalEnvironment & mkDoc 
     code = _code & mkDoc
+    currentLogDoc = _currentLog & mkDoc
 
 instance Show MachineState where
     show = renderStyle showStyle . mkDoc
@@ -216,7 +229,9 @@ uninitializedMachineState = MachineState {
     _updateStack = stackEmpty,
     _heap=M.empty,
     _globalEnvironment=M.empty,
-    _code=CodeUninitialized
+    _code=CodeUninitialized,
+    _oldLog=mempty,
+    _currentLog=mempty
 }
 
 maybeToMachineT :: Maybe a -> StgError -> MachineT a
@@ -262,7 +277,7 @@ compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineSta
 
       mainAddr <-  use globalEnvironment >>= (\x -> maybeToMachineT (x ^. at (VarName "main")) StgErrorUnableToFindMain) :: MachineT Addr
       -- NOTE: this is different from STG paper. Does this even work?
-      code .= CodeEnter mainAddr
+      setCode $ CodeEnter mainAddr
 
 isExprPrimitive :: ExprNode -> Bool
 isExprPrimitive (ExprNodeRawNumber _) = True
@@ -335,6 +350,11 @@ takeNArgs n = do
 stepMachine :: MachineT MachineProgress
 stepMachine = do
     code <- use code
+    
+    nowOldLog <- use currentLog
+    oldLog <>= nowOldLog
+    currentLog .= mempty
+
     case code of
         CodeEval f local -> stepCodeEval local f
         CodeEnter addr -> stepCodeEnter addr
@@ -342,9 +362,15 @@ stepMachine = do
         CodeReturnConstructor cons consvals -> stepCodeReturnConstructor cons consvals
 
 
+setCode :: Code -> MachineT ()
+setCode c = do
+    appendLog $ text "setting code to: " <+> mkDoc c
+    code .= c
+
 
 stepCodeReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeReturnConstructor cons values = do
+    appendLog $ text "stepCodeReturnConstructor called"
     returnStackEmpty <- use $ returnStack . to null
     if returnStackEmpty then
         return MachineHalted
@@ -364,12 +390,17 @@ stepCodeReturnConstructor cons values = do
       -- assert ((length varnames) == (length values))
       let newValuesMap = M.fromList (zip varnames values)
       let modifiedEnv =  newValuesMap `M.union` (cont ^. continuationEnv)
-      code .= CodeEval (matchingAlt ^. caseAltRHS) modifiedEnv
+      setCode $ CodeEval (matchingAlt ^. caseAltRHS) modifiedEnv
       return MachineStepped
+
+
+appendLog :: Doc -> MachineT ()
+appendLog s = currentLog <>= Log [s]
 
 -- | 'CodeEval' execution
 stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT MachineProgress
 stepCodeEval local expr = do
+    appendLog $ text "stepCodeEval called"
     case expr of
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
         ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet local  isReucursive bindings inExpr
@@ -381,7 +412,7 @@ stepCodeEval local expr = do
 stepCodeEvalConstructor :: LocalEnvironment -> Constructor -> MachineT MachineProgress
 stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
     consVals <- for consAtoms (lookupAtom local)
-    code .= CodeReturnConstructor cons consVals
+    setCode $ CodeReturnConstructor cons consVals
     return MachineStepped
 
 
@@ -390,7 +421,7 @@ stepIntIntrinsic f atoms = do
     -- make sure the function call looks like this
     let [AtomRawNumber (RawNumber x1str), AtomRawNumber (RawNumber x2str)] = atoms
     -- HACK: ewwww. convert these to actual godforsaken int.
-    code .= CodeReturnInt (RawNumber ((show (f (read x1str) (read x2str)))))
+    setCode $ CodeReturnInt (RawNumber ((show (f (read x1str) (read x2str)))))
     return MachineStepped
 
 
@@ -407,7 +438,7 @@ stepCodeEvalFnApplication local lhsName vars = do
             Just fnAddr ->  do
                   localVals <- for vars (lookupAtom local)
                   argumentStack `stackPushN` localVals
-                  code .= CodeEnter fnAddr
+                  setCode $ CodeEnter fnAddr
                   return MachineStepped
 
 
@@ -423,7 +454,7 @@ stepCodeEvalLet locals isLetRecursive bindings inExpr = do
   let newLocals = M.fromList closureNameValuePairs
   let updatedLocals = newLocals `M.union` locals
   -- let updatedLocals = foldl  (\local (name, addr) -> M.insert name (ValueAddr addr) local)  local closureNameAddrMap
-  code .= CodeEval inExpr updatedLocals
+  setCode $ CodeEval inExpr updatedLocals
   return MachineStepped
 
 
@@ -441,12 +472,12 @@ returnStackPush cont = do
 stepCodeEvalCase :: LocalEnvironment -> ExprNode -> [CaseAltType] -> MachineT MachineProgress
 stepCodeEvalCase local expr alts = do
   returnStackPush (Continuation alts local)
-  code .= CodeEval expr local
+  setCode $ CodeEval expr local
   return MachineStepped
 
 stepCodeEvalRawNumber :: RawNumber -> MachineT MachineProgress
 stepCodeEvalRawNumber rawnum = do
-  code .= CodeReturnInt rawnum
+  setCode $ CodeReturnInt rawnum
   return MachineStepped
 
 isClosureUpdatable :: Closure -> Bool
@@ -486,7 +517,7 @@ stepCodeEnterIntoUpdatableClosure closure = do
         argumentStack .= stackEmpty
         returnStack .= stackEmpty
 
-        code .= CodeEval evalExpr localEnv
+        setCode $ CodeEval evalExpr localEnv
         return MachineStepped
 
 -- provide the lambda and the list of free variables for binding
@@ -503,7 +534,7 @@ stepCodeEnterIntoNonupdatableClosure closure = do
     let localBoundVars = M.fromList (zip boundVars
                                                 boundVarVals)
     let localEnv = localFreeVars `M.union` localBoundVars
-    code .= CodeEval evalExpr localEnv
+    setCode $ CodeEval evalExpr localEnv
     return MachineStepped
 
 
@@ -558,7 +589,7 @@ stepCodeReturnInt i = do
   unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltRawNumber StgErrorExpectedCaseAltRawNumber
   let err = StgErrorNoMatchingAltPatternRawNumber i unwrapped_alts
   alt <- (filterEarliestAlt unwrapped_alts (== i )) `maybeToMachineT`  err
-  code .= CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
+  setCode $  CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
 
 genMachineTrace :: MachineState -> ([MachineState], Maybe StgError)
