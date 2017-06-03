@@ -1,2 +1,7 @@
+define check = {} \n {x} -> case x {} of
+                                3# -> Found {};;
+
 define main =  {} \n {} -> let sum = {} \n {} ->  plus# { 1#, 2# }
-                                in Int { sum }
+                                in case (Int { sum }) of
+                                        Int { x } -> check { x };
+                                                     
