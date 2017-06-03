@@ -135,11 +135,15 @@ instance P.ShowToken Token where
     showTokens :: NE.NonEmpty Token -> String
     showTokens xs = renderStyle showStyle (hcat (fmap mkDoc (NE.toList xs)))
 
+newtype StgInt = StgInt { unStgInt :: Int } deriving(Show, Eq)
 
-data Atom = AtomRawNumber !RawNumber | AtomVarName !VarName deriving(Show)
+instance Prettyable StgInt where
+  mkDoc (StgInt i) = text . show $ i
+
+data Atom = AtomInt !StgInt | AtomVarName !VarName deriving(Show)
 
 instance Prettyable Atom where
-    mkDoc (AtomRawNumber n) = mkDoc n
+    mkDoc (AtomInt n) = mkDoc n
     mkDoc (AtomVarName var) = mkDoc var
 
 data Binding = Binding {
@@ -166,7 +170,7 @@ data ExprNode = ExprNodeBinop !ExprNode !Token !ExprNode |
                ExprNodeConstructor !Constructor |
                ExprNodeLet !IsLetRecursive ![Binding] !ExprNode |
                ExprNodeCase !ExprNode ![CaseAltType] |
-               ExprNodeRawNumber !RawNumber
+               ExprNodeInt !StgInt
       
 
 
@@ -193,20 +197,20 @@ instance Prettyable ConstructorPatternMatch where
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
                       CaseAltConstructor !(CaseAlt ConstructorPatternMatch) |
                       -- | match with a number: 10 -> e
-                      CaseAltRawNumber !(CaseAlt RawNumber) |
+                      CaseAltInt !(CaseAlt StgInt) |
                       -- | match with a variable: x -> e
                       CaseAltVariable !(CaseAlt VarName) 
 
 
 
 instance Prettyable CaseAltType where
-  mkDoc (CaseAltConstructor altCons) = 
-    mkDoc (_caseAltLHS altCons) <+>
+  mkDoc (CaseAltConstructor a) = 
+    mkDoc (_caseAltLHS a) <+>
     text "->"  <+>
-    mkDoc (_caseAltRHS altCons) 
+    mkDoc (_caseAltRHS a) 
 
-  mkDoc (CaseAltRawNumber altRawNumber) = mkDoc altRawNumber
-  mkDoc (CaseAltVariable altIdentifier) = mkDoc altIdentifier
+  mkDoc (CaseAltInt a) = mkDoc a
+  mkDoc (CaseAltVariable a) = mkDoc a
 
 instance Show CaseAltType where
   show = renderStyle showStyle . mkDoc
@@ -264,9 +268,9 @@ instance Prettyable ExprNode where
 
     mkDoc (ExprNodeConstructor constructor) = mkDoc constructor
 
-    mkDoc (ExprNodeRawNumber number) = mkDoc number
-    mkDoc (ExprNodeCase caseexpr caseAlts) = text "case" <+> mkDoc caseexpr <+> text "of" <+> text "{" <+> (mkNest altsDoc)  <+> text "}" where
-                                              altsDoc = fmap mkDoc caseAlts & vcat
+    mkDoc (ExprNodeInt n) = mkDoc n
+    mkDoc (ExprNodeCase e alts) = text "case" <+> mkDoc e <+> text "of" <+> text "{" <+> (mkNest altsDoc)  <+> text "}" where
+                                              altsDoc = fmap mkDoc alts & vcat
 
 instance Show ExprNode where
     show = renderStyle showStyle . mkDoc

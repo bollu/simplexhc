@@ -134,8 +134,10 @@ istoken pred = token test Nothing where
 varNamep :: StgParser VarName
 varNamep = istoken (^? _TokenTypeVarName)
 
-rawNumberp :: StgParser RawNumber
-rawNumberp = istoken (^? _TokenTypeRawNumber)
+stgIntp :: StgParser StgInt
+stgIntp = do
+           raw <- istoken (^? _TokenTypeRawNumber)
+           return $ StgInt (raw ^. getRawNumber & read)
 
 updatep :: StgParser Bool
 updatep = istoken (^? _TokenTypeUpdate)
@@ -144,7 +146,7 @@ atomp :: StgParser Atom
 atomp = identp <|> numberp
     where
         identp = AtomVarName <$> varNamep
-        numberp = AtomRawNumber <$> rawNumberp
+        numberp = AtomInt <$> stgIntp
 
 
 
@@ -172,9 +174,6 @@ applicationp = do
         atoms <- atomListp
         return $ ExprNodeFnApplication fn_name atoms
 
-rawnumberp :: StgParser ExprNode
-rawnumberp = ExprNodeRawNumber <$> (istoken (^? _TokenTypeRawNumber))
-
 -- let(rec) parser: ("let" | "letrec") (<binding> ";")+ "in" <expr>
 letp :: StgParser ExprNode
 letp = do
@@ -200,15 +199,16 @@ caseConstructorAltp = do
   
   return $ CaseAltConstructor (CaseAlt patternMatch rhs)
 
-caseRawNumberAltp :: StgParser CaseAltType
-caseRawNumberAltp = do
-  num <- istoken (^? _TokenTypeRawNumber)
+caseStgIntAltp :: StgParser CaseAltType
+caseStgIntAltp = do
+  num <- stgIntp
   istoken (^? _TokenTypeThinArrow)
   rhs <- exprp
-  return $ CaseAltRawNumber (CaseAlt num rhs)
+  return $ CaseAltInt (CaseAlt num rhs)
+  
 
 caseAltp :: StgParser CaseAltType
-caseAltp = caseConstructorAltp <|> caseRawNumberAltp
+caseAltp = caseConstructorAltp <|> caseStgIntAltp
 
 casep :: StgParser ExprNode
 casep = do
@@ -240,7 +240,7 @@ exprp = applicationp <|>
         constructorp <|>
         -- FIXME: factor out "try" into a separate thing
         casep <|>
-        rawnumberp <|>
+        (ExprNodeInt <$> stgIntp) <|>
         parenExprp
 
 

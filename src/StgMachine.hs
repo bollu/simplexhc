@@ -121,7 +121,7 @@ data Code = CodeEval ExprNode LocalEnvironment |
             CodeEnter Addr |
             CodeUninitialized |
             CodeReturnConstructor Constructor [Value] |
-            CodeReturnInt RawNumber deriving(Show) 
+            CodeReturnInt StgInt deriving(Show)
 
 instance Prettyable Code where
   mkDoc (CodeEval expr env) = text "Eval" <+> braces (mkDoc expr) <+> text "|Local:" <+> braces(mkDoc env)
@@ -203,11 +203,11 @@ data StgError =
         -- | `returnStackPop` finds no continuation to return to
         StgErrorReturnStackEmpty |
         -- | `unwrapAlts` failed, unable to unwrap raw number
-        StgErrorExpectedCaseAltRawNumber !CaseAltType | 
+        StgErrorExpectedCaseAltInt !CaseAltType | 
         -- | `unwrapAlts` failed, unable to unwrap Constructor
         StgErrorExpectedCaseAltConstructor Constructor !CaseAltType | 
         -- | 'xxx' failed, no matching pattern match found
-        StgErrorNoMatchingAltPatternRawNumber RawNumber [CaseAlt RawNumber] |
+        StgErrorNoMatchingAltPatternInt StgInt [CaseAlt StgInt] |
         -- | 'xxx' failed, no matching pattern match found
         StgErrorNoMatchingAltPatternConstructor Constructor [CaseAlt ConstructorPatternMatch] deriving(Show)
 
@@ -280,7 +280,7 @@ compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineSta
       setCode $ CodeEnter mainAddr
 
 isExprPrimitive :: ExprNode -> Bool
-isExprPrimitive (ExprNodeRawNumber _) = True
+isExprPrimitive (ExprNodeInt _) = True
 isExprPrimitive _ = False
 
 isMachineStateFinal :: MachineState -> Bool
@@ -299,13 +299,11 @@ lookupVariable localEnv ident = do
         maybeToEither errormsg (localLookup <|> globalLookup)
 
 
-rawNumberToValue :: RawNumber -> Either StgError Value
-rawNumberToValue raw = maybeToEither errormsg mval where
-    mval = raw ^. getRawNumber & maybeRead & (fmap ValuePrimInt)
-    errormsg = StgErrorUnableToMkPrimInt raw
+stgIntToValue :: StgInt -> Value
+stgIntToValue si = ValuePrimInt (unStgInt si)
 
 lookupAtom :: LocalEnvironment -> Atom -> MachineT Value
-lookupAtom _ (AtomRawNumber r) = hoistError id (rawNumberToValue r)
+lookupAtom _ (AtomInt r) = return $ stgIntToValue r
 lookupAtom localEnv (AtomVarName ident) = lookupVariable localEnv ident
 
 
@@ -405,7 +403,7 @@ stepCodeEval local expr = do
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
         ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet local  isReucursive bindings inExpr
         ExprNodeCase expr alts -> stepCodeEvalCase local expr alts
-        ExprNodeRawNumber num -> stepCodeEvalRawNumber num
+        ExprNodeInt i -> stepCodeEvalInt i
         ExprNodeConstructor cons -> stepCodeEvalConstructor local cons
 
 
@@ -418,10 +416,9 @@ stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
 
 stepIntIntrinsic :: (Int -> Int -> Int) -> [Atom] -> MachineT  MachineProgress
 stepIntIntrinsic f atoms = do
-    -- make sure the function call looks like this
-    let [AtomRawNumber (RawNumber x1str), AtomRawNumber (RawNumber x2str)] = atoms
-    -- HACK: ewwww. convert these to actual godforsaken int.
-    setCode $ CodeReturnInt (RawNumber ((show (f (read x1str) (read x2str)))))
+    -- TODO: make this a lens match that can fail make sure the function call looks like this
+    let [AtomInt (StgInt x1), AtomInt (StgInt x2)] = atoms
+    setCode $ CodeReturnInt $ StgInt (f x1 x2)
     return MachineStepped
 
 
@@ -475,9 +472,9 @@ stepCodeEvalCase local expr alts = do
   setCode $ CodeEval expr local
   return MachineStepped
 
-stepCodeEvalRawNumber :: RawNumber -> MachineT MachineProgress
-stepCodeEvalRawNumber rawnum = do
-  setCode $ CodeReturnInt rawnum
+stepCodeEvalInt :: StgInt -> MachineT MachineProgress
+stepCodeEvalInt i = do
+  setCode $ CodeReturnInt i
   return MachineStepped
 
 isClosureUpdatable :: Closure -> Bool
@@ -583,11 +580,11 @@ filterEarliestAlt (c:cs) pred = if pred (c ^. caseAltLHS)
                                     else filterEarliestAlt cs pred
 
 -- | codeReturnInt execution
-stepCodeReturnInt :: RawNumber -> MachineT MachineProgress
+stepCodeReturnInt :: StgInt -> MachineT MachineProgress
 stepCodeReturnInt i = do
   cont <- returnStackPop
-  unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltRawNumber StgErrorExpectedCaseAltRawNumber
-  let err = StgErrorNoMatchingAltPatternRawNumber i unwrapped_alts
+  unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltInt StgErrorExpectedCaseAltInt
+  let err = StgErrorNoMatchingAltPatternInt i unwrapped_alts
   alt <- (filterEarliestAlt unwrapped_alts (== i )) `maybeToMachineT`  err
   setCode $  CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
