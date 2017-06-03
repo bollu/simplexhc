@@ -1,5 +1,6 @@
 define main =  {} \n {} -> let  s = {} \n {f, g, x} ->  
                                     let y = {g, x} \n {} -> g {x}
                                     in f {x, y};
-                                k = {} \n {x, y} -> x {}; in s {k, k, 3#};
-
+                                k = {} \n {x, y} -> x {};
+                                three = {} \n {} -> Int { 3# };
+                                in s {k, k, three};
