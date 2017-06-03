@@ -1,0 +1,13 @@
+// I don't fully understand why we can't add a rule for "Eval <rawnum>", since that would
+// let us not have to box everything!
+
+define k = {} \n {x, y} -> x {};
+define ap2 = {} \n {f} -> let two = {} \n {} -> Two {}
+                           in f { two };
+
+define one = {} \n {} -> One {};
+define pap = {} \n {} -> let k1 = {} \n {} -> k {one}
+                         in ap2 {k1};
+
+define main = {} \n {} -> case (pap {}) of
+                                One {} -> Found {}
