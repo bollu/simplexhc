@@ -60,8 +60,7 @@ runFile fpath = do
           (Left compileErr) -> do  
                                       putStrLn "compile error: "
                                       putStrLn  $ compileErr
-          (Right trace) -> do
-            putStr . getTraceString $ trace
+          (Right trace) -> putStr . getTraceString $ trace
             
 main :: IO ()
 main = do
