@@ -105,7 +105,7 @@ data Closure = Closure {
 instance Prettyable Closure where
   mkDoc (Closure{..}) = (mkStyleTag (text "cls:<<"))
                          <+> mkDoc _closureLambda $$
-                         text "|" <+> mkDoc  _closureFreeVars <+> (mkStyleTag (text ">>"))
+                         text "| env: " <+> mkDoc  _closureFreeVars <+> (mkStyleTag (text ">>"))
 
 
 type LocalEnvironment = M.Map VarName Value
@@ -449,19 +449,45 @@ stepCodeEvalRawNumber rawnum = do
   code .= CodeReturnInt rawnum
   return MachineStepped
 
+isClosureUpdatable :: Closure -> Bool
+isClosureUpdatable cls = cls ^. closureLambda ^. lambdaShouldUpdate
+
 -- | codeEnter execution
 stepCodeEnter :: Addr -> MachineT MachineProgress
 stepCodeEnter addr = 
     do
         closure <- lookupAddrInHeap addr
-        case closure of
-            Closure {
-                _closureLambda = Lambda {
-                    _lambdaShouldUpdate = False
-                }
-            } -> stepCodeEnterIntoNonupdatableClosure closure
-            other -> undefined -- $ "cannot handle closure like: " ++ (show other)
+        if isClosureUpdatable closure
+        then stepCodeEnterIntoUpdatableClosure closure
+        else stepCodeEnterIntoNonupdatableClosure closure
 
+-- Enter a as rs where heap[ a -> (vs \u {} -> e) ws_f] 
+-- Eval e local {} {} (as, rs, a):us heap where
+--    local = [vs -> ws_f]
+stepCodeEnterIntoUpdatableClosure :: Closure -> MachineT MachineProgress
+stepCodeEnterIntoUpdatableClosure closure = do
+    let l = closure ^. closureLambda
+    let boundVars = l ^. lambdaBoundVarIdentifiers
+    let freeVars = l ^. lambdaFreeVarIdentifiers
+    let evalExpr =  l ^. lambdaExprNode
+
+    -- is there a better way to format this?
+    if (length boundVars /= 0) then error "updatable closure has bound variables"
+    else do
+        let localFreeVars = M.fromList (zip freeVars
+                                                (closure ^. closureFreeVars . getFreeVars))
+        let localEnv = localFreeVars
+
+        -- push an update frame
+        as <- use argumentStack
+        rs <- use returnStack
+
+        -- empty argument and return stack so that them being deref'd will trigger an update
+        argumentStack .= stackEmpty
+        returnStack .= stackEmpty
+
+        code .= CodeEval evalExpr localEnv
+        return MachineStepped
 
 -- provide the lambda and the list of free variables for binding
 stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT MachineProgress
