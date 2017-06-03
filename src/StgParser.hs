@@ -175,7 +175,7 @@ applicationp = do
 rawnumberp :: StgParser ExprNode
 rawnumberp = ExprNodeRawNumber <$> (istoken (^? _TokenTypeRawNumber))
 
--- let(rec) parser: ("let" | "letrec") <binding>+ "in" <expr>
+-- let(rec) parser: ("let" | "letrec") (<binding> ";")+ "in" <expr>
 letp :: StgParser ExprNode
 letp = do
   isLetRecursive <- istoken (\case 
@@ -252,7 +252,7 @@ variableListp = do
 
 
 -- Lambda form
--- <free vars> <should update> <bound vars> -> <expr>
+-- <free vars> <should update> <bound vars> "->" <expr>
 -- {x y} \n {z}  -> f x y z
 lambdap :: StgParser Lambda
 lambdap = do

@@ -1,3 +1,0 @@
-define main =  {} \n {} -> case Nil {} of
-                                (Nil {}) -> id {3#};
-                                (Cons {2#}) -> id {2#};

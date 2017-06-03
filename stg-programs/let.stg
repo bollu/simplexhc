@@ -1,1 +1,5 @@
-define main =  {} \n {} -> K
+define main =  {} \n {} -> let  s = {} \n {f, g, x} ->  
+                                    let y = {g, x} \n {} -> g {x}
+                                    in f {x, y};
+                                k = {} \n {x, y} -> x {}; in s {k, k, 3#};
+

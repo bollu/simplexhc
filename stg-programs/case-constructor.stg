@@ -1,0 +1,3 @@
+define main =  {} \n {} -> case (Nil {}) of
+                                Cons {x} -> Int {2#};
+                                Nil {} -> Int {3#};
