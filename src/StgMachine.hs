@@ -83,6 +83,10 @@ instance Show Value where
 
 -- | Stack of 'Value'
 newtype Stack a = Stack { _unStack :: [a] } deriving(Functor, Monoid, Foldable, Traversable)
+
+stackLength :: Stack a -> Int
+stackLength = length . _unStack
+
 stackEmpty :: Stack a
 stackEmpty = Stack []
 
@@ -103,21 +107,21 @@ type Heap = M.Map Addr Closure
 type GlobalEnvironment = M.Map VarName Addr
 
 -- | has bindings of free variables with a 'LambdaForm'
-newtype ClosureFreeVars = ClosureFreeVars { _getFreeVars :: [Value] } deriving(Show)
-instance Prettyable ClosureFreeVars where
-  mkDoc freeVars = _getFreeVars freeVars & map mkDoc & punctuate (text ",") & hsep
+newtype ClosureFreeVals = ClosureFreeVals { _getFreeVals :: [Value] } deriving(Show)
+instance Prettyable ClosureFreeVals where
+  mkDoc freeVars = _getFreeVals freeVars & map mkDoc & punctuate (text ",") & hsep
 data Closure = Closure { 
     _closureLambda :: !Lambda,
-    _closureFreeVars :: !ClosureFreeVars
+    _closureFreeVals :: !ClosureFreeVals
 } deriving (Show)
 
 instance Prettyable Closure where
   -- TODO: allow closure to invoke a custom renderer for free variables in the lambdaForm
   mkDoc (Closure{..}) = (mkStyleTag (text "cls:")) <+> text "["
                          <+> mkDoc _closureLambda PP.<> envdoc <+> text "]" where
-            envdoc = if length ( _getFreeVars ( _closureFreeVars)) == 0
+            envdoc = if length ( _getFreeVals ( _closureFreeVals)) == 0
                     then text ""
-                    else text " | Free variable vals: " <+> mkDoc  _closureFreeVars 
+                    else text " | Free variable vals: " <+> mkDoc  _closureFreeVals 
                         
 
 
@@ -225,7 +229,7 @@ data StgError =
         -- | tried to update an address where no previous value exists
         StgErrorHeapUpdateHasNoPreviousValue Addr deriving(Show)
 
-makeLenses ''ClosureFreeVars
+makeLenses ''ClosureFreeVals
 makePrisms ''Value
 makeLenses ''Closure
 makePrisms ''Code
@@ -328,7 +332,7 @@ mkClosureFromLambda lambda localenv =
       freeVarVals <- for (lambda ^. lambdaFreeVarIdentifiers) (lookupVariable  localenv)
       let cls = Closure {
         _closureLambda = lambda,
-        _closureFreeVars = ClosureFreeVars (freeVarVals)
+        _closureFreeVals = ClosureFreeVals (freeVarVals)
       }
       return cls
 
@@ -410,7 +414,7 @@ mkConstructorClosure c consVals = Closure {
             _lambdaFreeVarIdentifiers =  freeVarIds,
             _lambdaExprNode = ExprNodeConstructor cons
         },
-        _closureFreeVars = ClosureFreeVars consVals
+        _closureFreeVals = ClosureFreeVals consVals
     }
     where
        freeVarIds = map (VarName . (\x -> "id" ++ show x)) [1..(length consVals)]
@@ -574,7 +578,7 @@ stepCodeEnter addr =
         closure <- lookupAddrInHeap addr
         if isClosureUpdatable closure
         then stepCodeEnterIntoUpdatableClosure addr closure
-        else stepCodeEnterIntoNonupdatableClosure closure
+        else stepCodeEnterIntoNonupdatableClosure addr closure
 
 -- Enter a as rs where heap[ a -> (vs \u {} -> e) ws_f] 
 -- Eval e local {} {} (as, rs, a):us heap where
@@ -586,7 +590,7 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
     appendLog $ mkDoc closure <+> text "is updatable."
     let l = closure ^. closureLambda
     let boundVars = l ^. lambdaBoundVarIdentifiers
-    let freeVars = l ^. lambdaFreeVarIdentifiers
+    let freeVarIds = l ^. lambdaFreeVarIdentifiers
     let evalExpr =  l ^. lambdaExprNode
 
     -- is there a better way to format this?
@@ -594,8 +598,8 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
         appendLog $ text "updatable closure has bound variables:" <+> mkDoc boundVars
         error "updatable closure has bound variables"
     else do
-        let localFreeVars = M.fromList (zip freeVars
-                                                (closure ^. closureFreeVars . getFreeVars))
+        let localFreeVars = M.fromList (zip freeVarIds
+                                                (closure ^. closureFreeVals . getFreeVals))
         let localEnv = localFreeVars
 
         -- push an update frame
@@ -611,23 +615,71 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
         setCode $ CodeEval evalExpr localEnv
         return MachineStepped
 
+
+
+-- | old closure, new closure, argument stack
+-- | we are trying to update the old closure to capture the stuff the new closure
+-- | does. So, we create a closure which executes the new closure's code from the
+-- | old closure's context. Yes this is mind bending.
+-- | rule 17 in the STG paper.
+-- heap[addr] = old (vs \n xs -> e) ws_f
+-- length (as) < length (xs)
+-- new (vs ++ xs1 \n xs2 -> e) (ws_f ++ as)
+-- we add more free variables (as many there were on the current argument stack)
+mkEnterUpdateNewClosure :: Closure -> Closure ->  [Value] -> Closure
+mkEnterUpdateNewClosure old new as = new {
+    _closureFreeVals = ClosureFreeVals (new ^. closureFreeVals . getFreeVals ++ as),
+    _closureLambda = (new ^. closureLambda) {
+        _lambdaFreeVarIdentifiers = oldBound ++ boundToFree,
+        _lambdaBoundVarIdentifiers = stillBound
+        }
+    } where
+        nStackArgs = length as
+        oldBound = old ^. closureLambda ^. lambdaBoundVarIdentifiers
+        -- xs1 ++ xs2 = xs
+        (boundToFree, stillBound) = (take nStackArgs oldBound, drop nStackArgs oldBound)
+
 -- provide the lambda and the list of free variables for binding
-stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT MachineProgress
-stepCodeEnterIntoNonupdatableClosure closure = do
+stepCodeEnterIntoNonupdatableClosure :: Addr -> Closure -> MachineT MachineProgress
+stepCodeEnterIntoNonupdatableClosure addr closure = do
     appendLog $ mkDoc closure <+> text "is not updatable."
     let l = closure ^. closureLambda
     let boundVars = l ^. lambdaBoundVarIdentifiers
     let freeVars = l ^. lambdaFreeVarIdentifiers
     let evalExpr =  l ^. lambdaExprNode
 
-    boundVarVals <- boundVars & length & takeNArgs
-    let localFreeVars = M.fromList (zip freeVars
-                                               (closure ^. closureFreeVars . getFreeVars))
-    let localBoundVars = M.fromList (zip boundVars
-                                                boundVarVals)
-    let localEnv = localFreeVars `M.union` localBoundVars
-    setCode $ CodeEval evalExpr localEnv
-    return MachineStepped
+    argStackLength <- use (argumentStack . to stackLength)
+
+    -- we don't have enough arguments to feed the closure, so we pop the update stack
+    -- and pull values out
+    if argStackLength < length boundVars
+    -- we need to pop the update stack
+    then do
+        UpdateFrame {
+            _updateFrameAddress=addru,
+            _updateFrameArgumentStack=argStacku,
+            _updateFrameReturnStack=rsu
+        } <- updateStackPop
+        argStackList <- use (argumentStack .  unStack)
+
+        oldClosure <- lookupAddrInHeap addru
+        heapUpdateAddress addru (mkEnterUpdateNewClosure oldClosure closure argStackList)
+
+        returnStack .= rsu
+        argumentStack <>= argStacku
+
+        code .= CodeEnter addr
+        return MachineStepped
+       
+    else do
+        boundVarVals <- boundVars & length & takeNArgs
+        let localFreeVals = M.fromList (zip freeVars
+                                                (closure ^. closureFreeVals . getFreeVals))
+        let localBoundVals = M.fromList (zip boundVars
+                                                    boundVarVals)
+        let localEnv = localFreeVals `M.union` localBoundVals
+        setCode $ CodeEval evalExpr localEnv
+        return MachineStepped
 
 
 -- | Return the variable if the continuation contains an alternative
