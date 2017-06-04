@@ -1,0 +1,4 @@
+define sum = {} \n {} ->  plus# { 1#, 2# };
+define updatablesum = {} \u {} -> Int { sum };
+define main =  {} \n {} ->  case updatablesum {} of
+                               Int {x} -> Done {}

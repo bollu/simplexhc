@@ -56,10 +56,10 @@ data UpdateFrame = UpdateFrame {
                                  _updateFrameAddress :: Addr
                                }
 instance Prettyable UpdateFrame where
-  mkDoc UpdateFrame{..} = text "Argument Stack: " $$
+  mkDoc UpdateFrame{..} = nest 4 (text "Argument Stack: " $$
                           mkDoc _updateFrameArgumentStack $$
                           text "Return Stack: " $$
-                          mkDoc _updateFrameReturnStack
+                          mkDoc _updateFrameReturnStack)
 
 
 -- | Represents an STG Address
@@ -88,7 +88,7 @@ stackEmpty = Stack []
 
 instance Prettyable a => Prettyable (Stack a) where
   mkDoc (Stack []) = text "EMPTY"
-  mkDoc (Stack xs) = text ("count: " ++ show (length xs)) $+$ text "TOP" $+$ ((fmap mkDoc xs) & sep) $+$ text "BOTTOM"
+  mkDoc (Stack xs) = text ("count: " ++ show (length xs)) $+$ text "TOP" $+$ nest 4 ((fmap mkDoc xs) & sep) $+$ text "BOTTOM"
 
 instance Prettyable a => Show (Stack a) where
   show = renderStyle showStyle . mkDoc
@@ -112,11 +112,12 @@ data Closure = Closure {
 } deriving (Show)
 
 instance Prettyable Closure where
-  mkDoc (Closure{..}) = (mkStyleTag (text "cls:<<"))
-                         <+> mkDoc _closureLambda PP.<> envdoc <+> mkStyleTag(text ">>") where
+  -- TODO: allow closure to invoke a custom renderer for free variables in the lambdaForm
+  mkDoc (Closure{..}) = (mkStyleTag (text "cls:")) <+> text "["
+                         <+> mkDoc _closureLambda PP.<> envdoc <+> text "]" where
             envdoc = if length ( _getFreeVars ( _closureFreeVars)) == 0
                     then text ""
-                    else text "| env: " <+> mkDoc  _closureFreeVars <+> mkStyleTag (text ">>")
+                    else text " | Free variable vals: " <+> mkDoc  _closureFreeVars 
                         
 
 
@@ -388,13 +389,13 @@ updateStackPop = stackPop updateStack StgErrorReturnStackEmpty
 -- TODO: find out how to make this look nicer
 heapUpdateAddress :: Addr -> Closure -> MachineT ()
 heapUpdateAddress addr cls = do
-    appendLog $ text "updating heap at address:" <+> mkDoc addr <+> text "with new closure:" <+> mkDoc cls
+    appendLog $ text "trying to update heap at address:" <+> mkDoc addr <+> text "with new closure:" <+> mkDoc cls
     h <- use heap
     case h ^. at addr of
         Nothing -> do
+                appendError $ text "heap does not contain address:" <+> mkDoc addr
                 throwError $ StgErrorHeapUpdateHasNoPreviousValue addr
         Just oldcls -> do
-                appendLog $ text "replacing old closure:" <+> mkDoc oldcls
                 let h' = at addr .~ Just cls $ h
                 heap .= h'
                 return ()
@@ -414,8 +415,10 @@ mkConstructorClosure c consVals = Closure {
     where
        freeVarIds = map (VarName . (\x -> "id" ++ show x)) [1..(length consVals)]
        cons = Constructor (c ^. constructorName) (map AtomVarName freeVarIds)
+
 stepCodeUpdatableReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeUpdatableReturnConstructor cons values = do
+    appendLog $ text "using updatable return constructor."
     frame <- updateStackPop
 
     let as = frame ^. updateFrameArgumentStack
@@ -433,7 +436,7 @@ stepCodeUpdatableReturnConstructor cons values = do
 
 stepCodeNonUpdatableReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeNonUpdatableReturnConstructor cons values = do
-    appendLog $ text "stepCodeReturnConstructor called"
+    appendLog $ text "using non-updatable return constructor."
     returnStackEmpty <- use $ returnStack . to null
     if returnStackEmpty then
         return MachineHalted
@@ -456,35 +459,24 @@ stepCodeNonUpdatableReturnConstructor cons values = do
       setCode $ CodeEval (matchingAlt ^. caseAltRHS) modifiedEnv
       return MachineStepped
 
+
+shouldUseUpdatableStepForReturnConstructor :: MachineState -> Bool
+shouldUseUpdatableStepForReturnConstructor MachineState {..} = length _argumentStack == 0 &&
+                                                       length _returnStack == 0 &&
+                                                       length _updateStack > 0
 
 stepCodeReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeReturnConstructor cons values = do
-    appendLog $ text "stepCodeReturnConstructor called"
-    returnStackEmpty <- use $ returnStack . to null
-    if returnStackEmpty then
-        return MachineHalted
-    else do
-      cont <- returnStackPop
+   useUpdate <- gets shouldUseUpdatableStepForReturnConstructor
+   if useUpdate then
+      stepCodeUpdatableReturnConstructor cons values
+   else
+     stepCodeNonUpdatableReturnConstructor cons values
 
-      let unwrapErr = StgErrorExpectedCaseAltConstructor cons
-      unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltConstructor  unwrapErr
-
-      let filterErr = StgErrorNoMatchingAltPatternConstructor cons unwrapped_alts
-      let consname = cons ^. constructorName
-      let pred (ConstructorPatternMatch name _) = name == consname
-
-      matchingAlt <- (filterEarliestAlt unwrapped_alts pred) `maybeToMachineT` filterErr
-      let (ConstructorPatternMatch _ varnames) = matchingAlt ^. caseAltLHS
-
-      -- assert ((length varnames) == (length values))
-      let newValuesMap = M.fromList (zip varnames values)
-      let modifiedEnv =  newValuesMap `M.union` (cont ^. continuationEnv)
-      setCode $ CodeEval (matchingAlt ^. caseAltRHS) modifiedEnv
-      return MachineStepped
 
 
 appendError :: Doc -> MachineT ()
-appendError = appendLog
+appendError = appendLog . mkStyleError
 
 appendLog :: Doc -> MachineT ()
 appendLog s = currentLog <>= Log [s]
@@ -501,10 +493,6 @@ stepCodeEval local expr = do
         ExprNodeConstructor cons -> stepCodeEvalConstructor local cons
 
 
-shouldUseUpdateFrameForConstructor :: MachineState -> Bool
-shouldUseUpdateFrameForConstructor MachineState {..} = length _argumentStack == 0 &&
-                                                       length _returnStack == 0 &&
-                                                       length _updateStack > 0
 
 stepCodeEvalConstructor :: LocalEnvironment -> Constructor -> MachineT MachineProgress
 stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
