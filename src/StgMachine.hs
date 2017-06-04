@@ -47,10 +47,19 @@ instance Show Continuation where
     show = renderStyle showStyle . mkDoc
 
 
-data UpdateFrame
-
+data UpdateFrame = UpdateFrame {
+                                 -- | the argument stack that was present when the update frame was created.
+                                 _updateFrameArgumentStack :: !ArgumentStack,
+                                 -- | The return stack that was present when the update frame was created.
+                                 _updateFrameReturnStack :: !ReturnStack,
+                                 -- | The address of the heap closure to be updated.
+                                 _updateFrameAddress :: Addr
+                               }
 instance Prettyable UpdateFrame where
-  mkDoc _ = text "update-frame"
+  mkDoc UpdateFrame{..} = text "Argument Stack: " $$
+                          mkDoc _updateFrameArgumentStack $$
+                          text "Return Stack: " $$
+                          mkDoc _updateFrameReturnStack
 
 
 -- | Represents an STG Address
@@ -209,7 +218,11 @@ data StgError =
         -- | 'xxx' failed, no matching pattern match found
         StgErrorNoMatchingAltPatternInt StgInt [CaseAlt StgInt] |
         -- | 'xxx' failed, no matching pattern match found
-        StgErrorNoMatchingAltPatternConstructor Constructor [CaseAlt ConstructorPatternMatch] deriving(Show)
+        StgErrorNoMatchingAltPatternConstructor Constructor [CaseAlt ConstructorPatternMatch] |
+        -- | tried to pop empty update frame
+        StgErrorUpdateStackEmpty |
+        -- | tried to update an address where no previous value exists
+        StgErrorHeapUpdateHasNoPreviousValue Addr deriving(Show)
 
 makeLenses ''ClosureFreeVars
 makePrisms ''Value
@@ -219,8 +232,7 @@ makeLenses ''MachineState
 makeLenses ''Addr
 makeLenses ''Continuation
 makeLenses ''Stack
-
--- runExceptT :: ExceptT e (State s) a -> State s (Either e a)
+makeLenses ''UpdateFrame
 
 uninitializedMachineState :: MachineState
 uninitializedMachineState = MachineState {
@@ -336,9 +348,13 @@ lookupAddrInHeap addr = do
 -- pop n values off the argument stack
 takeNArgs :: Int -> MachineT [Value]
 takeNArgs n = do
+    appendLog $ text "popping" <+> text (show n) <+> text "off of the argument stack"
+
     argStackList <- use (argumentStack . unStack)
     if length argStackList < n
-        then throwError $ StgErrorNotEnoughArgsOnStack n (Stack argStackList)
+        then do
+            appendLog $ text "length of argument stack:" <+> text (show (length argStackList)) <+> text "< n:" <+> text (show n)
+            throwError $ StgErrorNotEnoughArgsOnStack n (Stack argStackList)
         else do
             let args = take n argStackList
             argumentStack .= Stack (drop n argStackList)
@@ -364,6 +380,81 @@ setCode :: Code -> MachineT ()
 setCode c = do
     appendLog $ text "setting code to: " <+> mkDoc c
     code .= c
+
+updateStackPop :: MachineT UpdateFrame
+updateStackPop = stackPop updateStack StgErrorReturnStackEmpty
+
+
+-- TODO: find out how to make this look nicer
+heapUpdateAddress :: Addr -> Closure -> MachineT ()
+heapUpdateAddress addr cls = do
+    appendLog $ text "updating heap at address:" <+> mkDoc addr <+> text "with new closure:" <+> mkDoc cls
+    h <- use heap
+    case h ^. at addr of
+        Nothing -> do
+                throwError $ StgErrorHeapUpdateHasNoPreviousValue addr
+        Just oldcls -> do
+                appendLog $ text "replacing old closure:" <+> mkDoc oldcls
+                let h' = at addr .~ Just cls $ h
+                heap .= h'
+                return ()
+
+-- | create the standard closure for a constructor
+-- | << (freeVarIds \n {} -> c freeVarIds), consVals >>
+mkConstructorClosure :: Constructor -> [Value] -> Closure
+mkConstructorClosure c consVals = Closure {
+    _closureLambda = Lambda {
+            _lambdaShouldUpdate = False,
+            _lambdaBoundVarIdentifiers = [],
+            _lambdaFreeVarIdentifiers =  freeVarIds,
+            _lambdaExprNode = ExprNodeConstructor cons
+        },
+        _closureFreeVars = ClosureFreeVars consVals
+    }
+    where
+       freeVarIds = map (VarName . (\x -> "id" ++ show x)) [1..(length consVals)]
+       cons = Constructor (c ^. constructorName) (map AtomVarName freeVarIds)
+stepCodeUpdatableReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
+stepCodeUpdatableReturnConstructor cons values = do
+    frame <- updateStackPop
+
+    let as = frame ^. updateFrameArgumentStack
+    let rs = frame ^. updateFrameReturnStack
+    let addr = frame ^. updateFrameAddress
+
+    returnStack .= rs
+    argumentStack .= as
+
+    let consClosure = mkConstructorClosure cons values
+    heapUpdateAddress addr (consClosure)
+
+    return $ MachineStepped
+
+
+stepCodeNonUpdatableReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
+stepCodeNonUpdatableReturnConstructor cons values = do
+    appendLog $ text "stepCodeReturnConstructor called"
+    returnStackEmpty <- use $ returnStack . to null
+    if returnStackEmpty then
+        return MachineHalted
+    else do
+      cont <- returnStackPop
+
+      let unwrapErr = StgErrorExpectedCaseAltConstructor cons
+      unwrapped_alts <- unwrapAlts (cont ^. continuationAlts) _CaseAltConstructor  unwrapErr
+
+      let filterErr = StgErrorNoMatchingAltPatternConstructor cons unwrapped_alts
+      let consname = cons ^. constructorName
+      let pred (ConstructorPatternMatch name _) = name == consname
+
+      matchingAlt <- (filterEarliestAlt unwrapped_alts pred) `maybeToMachineT` filterErr
+      let (ConstructorPatternMatch _ varnames) = matchingAlt ^. caseAltLHS
+
+      -- assert ((length varnames) == (length values))
+      let newValuesMap = M.fromList (zip varnames values)
+      let modifiedEnv =  newValuesMap `M.union` (cont ^. continuationEnv)
+      setCode $ CodeEval (matchingAlt ^. caseAltRHS) modifiedEnv
+      return MachineStepped
 
 
 stepCodeReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
@@ -392,6 +483,9 @@ stepCodeReturnConstructor cons values = do
       return MachineStepped
 
 
+appendError :: Doc -> MachineT ()
+appendError = appendLog
+
 appendLog :: Doc -> MachineT ()
 appendLog s = currentLog <>= Log [s]
 
@@ -406,6 +500,11 @@ stepCodeEval local expr = do
         ExprNodeInt i -> stepCodeEvalInt i
         ExprNodeConstructor cons -> stepCodeEvalConstructor local cons
 
+
+shouldUseUpdateFrameForConstructor :: MachineState -> Bool
+shouldUseUpdateFrameForConstructor MachineState {..} = length _argumentStack == 0 &&
+                                                       length _returnStack == 0 &&
+                                                       length _updateStack > 0
 
 stepCodeEvalConstructor :: LocalEnvironment -> Constructor -> MachineT MachineProgress
 stepCodeEvalConstructor local (cons @ (Constructor consname consAtoms)) = do
@@ -486,21 +585,26 @@ stepCodeEnter addr =
     do
         closure <- lookupAddrInHeap addr
         if isClosureUpdatable closure
-        then stepCodeEnterIntoUpdatableClosure closure
+        then stepCodeEnterIntoUpdatableClosure addr closure
         else stepCodeEnterIntoNonupdatableClosure closure
 
 -- Enter a as rs where heap[ a -> (vs \u {} -> e) ws_f] 
 -- Eval e local {} {} (as, rs, a):us heap where
 --    local = [vs -> ws_f]
-stepCodeEnterIntoUpdatableClosure :: Closure -> MachineT MachineProgress
-stepCodeEnterIntoUpdatableClosure closure = do
+-- | Addr is the address of the closure
+-- | Closure is the closure
+stepCodeEnterIntoUpdatableClosure :: Addr -> Closure -> MachineT MachineProgress
+stepCodeEnterIntoUpdatableClosure addr closure = do
+    appendLog $ mkDoc closure <+> text "is updatable."
     let l = closure ^. closureLambda
     let boundVars = l ^. lambdaBoundVarIdentifiers
     let freeVars = l ^. lambdaFreeVarIdentifiers
     let evalExpr =  l ^. lambdaExprNode
 
     -- is there a better way to format this?
-    if (length boundVars /= 0) then error "updatable closure has bound variables"
+    if (length boundVars /= 0) then do
+        appendLog $ text "updatable closure has bound variables:" <+> mkDoc boundVars
+        error "updatable closure has bound variables"
     else do
         let localFreeVars = M.fromList (zip freeVars
                                                 (closure ^. closureFreeVars . getFreeVars))
@@ -509,6 +613,8 @@ stepCodeEnterIntoUpdatableClosure closure = do
         -- push an update frame
         as <- use argumentStack
         rs <- use returnStack
+        stackPushN updateStack [(UpdateFrame as rs addr)]
+        appendLog $ text "pushed update frame"
 
         -- empty argument and return stack so that them being deref'd will trigger an update
         argumentStack .= stackEmpty
@@ -520,6 +626,7 @@ stepCodeEnterIntoUpdatableClosure closure = do
 -- provide the lambda and the list of free variables for binding
 stepCodeEnterIntoNonupdatableClosure :: Closure -> MachineT MachineProgress
 stepCodeEnterIntoNonupdatableClosure closure = do
+    appendLog $ mkDoc closure <+> text "is not updatable."
     let l = closure ^. closureLambda
     let boundVars = l ^. lambdaBoundVarIdentifiers
     let freeVars = l ^. lambdaFreeVarIdentifiers
@@ -555,15 +662,18 @@ caseAltsGetUniqueMatch pats val =
       [alt] -> Just (Right alt)
       alts -> Just (Left (StgErrorCaseAltsOverlappingPatterns))
 
-returnStackPop :: MachineT Continuation
-returnStackPop = do
-  isempty <- use (returnStack . to null)
+stackPop :: Lens' MachineState (Stack a) -> StgError -> MachineT a
+stackPop stacklens err = do
+  isempty <- use (stacklens . to null)
   if isempty
   then
-    throwError StgErrorReturnStackEmpty
+    throwError err
   else do
-    top <- returnStack %%= (\(Stack (r:rs)) -> (r, Stack rs))
+    top <- stacklens %%= (\(Stack (x:xs)) -> (x, Stack xs))
     return top
+
+returnStackPop :: MachineT Continuation
+returnStackPop = stackPop returnStack StgErrorReturnStackEmpty
 
 unwrapAlts :: [CaseAltType] -> Prism' CaseAltType a -> (CaseAltType -> StgError) -> MachineT [a]
 unwrapAlts [] p err = return []
