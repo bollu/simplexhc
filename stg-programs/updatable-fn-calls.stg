@@ -1,0 +1,7 @@
+define g = {} \n {x, y} -> x {};
+define main = {} \n {} -> let
+                            x = {} \n {} -> 1#;
+                            y = {} \n {} -> 2#;
+                            f = {x, y} \u {} -> g {x, y};
+                         in case (f {}) of
+                                 1# -> Done {};

@@ -530,18 +530,16 @@ stepCodeEvalFnApplication local lhsName vars = do
                   return MachineStepped
 
 
+_updateEnvWithBinding :: LocalEnvironment -> Binding -> MachineT LocalEnvironment
+_updateEnvWithBinding l b = do
+                  (name, addr) <- allocateBinding l b
+                  let l' = l & at name .~ Just (ValueAddr addr)
+                  return l'
 
 stepCodeEvalLet :: LocalEnvironment -> IsLetRecursive -> [Binding] -> ExprNode -> MachineT MachineProgress
 stepCodeEvalLet locals isLetRecursive bindings inExpr = do
-  let lookupEnv = locals
-  closureNameAddrPairs <- for bindings (allocateBinding lookupEnv) :: MachineT [(VarName, Addr)]
-
-  let closureNameValuePairs = closureNameAddrPairs & traverse . _2 %~ ValueAddr
-
-  -- TODO: rewrite with M.union
-  let newLocals = M.fromList closureNameValuePairs
+  newLocals <- foldlM _updateEnvWithBinding locals bindings
   let updatedLocals = newLocals `M.union` locals
-  -- let updatedLocals = foldl  (\local (name, addr) -> M.insert name (ValueAddr addr) local)  local closureNameAddrMap
   setCode $ CodeEval inExpr updatedLocals
   return MachineStepped
 
