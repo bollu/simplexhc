@@ -43,17 +43,17 @@ repl = do
 
 getTraceString :: ([MachineState], Maybe StgError) -> String
 getTraceString (trace, mErr) = 
-  traceStr ++ "\n\n\nFinal:\n======\n" ++ errStr where
+  traceStr ++ "\n\n\nFinal:\n==================================\n" ++ errStr where
   errStr = case mErr of
             Nothing -> "Success"
             Just err -> show err ++ machineFinalStateLogStr 
-  traceStr = intercalate "\n\n=====\n\n" (fmap show trace) 
+  traceStr = intercalate "\n\n==================================\n\n" (fmap show trace) 
   machineFinalStateLogStr = if length trace == 0 then "" else "\nlog:\n====\n" ++ show ((last trace) ^. currentLog)
 
 runFile :: String -> IO ()
 runFile fpath = do
     raw <- Prelude.readFile fpath
-    putStrLn "Interp:\n=====\n"
+    putStrLn "Interp:\n=======================================\n"
     let mInitState = tryCompileString raw
     
     let trace = fmap genMachineTrace mInitState

@@ -92,7 +92,10 @@ stackEmpty = Stack []
 
 instance Prettyable a => Prettyable (Stack a) where
   mkDoc (Stack []) = text "EMPTY"
-  mkDoc (Stack xs) = text ("count: " ++ show (length xs)) $+$ text "TOP" $+$ nest 4 ((fmap mkDoc xs) & sep) $+$ text "BOTTOM"
+  mkDoc (Stack xs) = text ("count: " ++ show (length xs)) $+$
+                           mkStyleAnnotation (text "TOP") $+$
+                           ((zipWith (<+>) (fmap (\i -> mkStyleAnnotation (PP.text "|" PP.<> PP.int i PP.<> text ":")) [1..] ) (fmap mkDoc xs)) & sep) $+$
+                           mkStyleAnnotation (text "BOTTOM")
 
 instance Prettyable a => Show (Stack a) where
   show = renderStyle showStyle . mkDoc
@@ -373,6 +376,7 @@ stepMachine = do
     nowOldLog <- use currentLog
     oldLog <>= nowOldLog
     currentLog .= mempty
+    appendLog $ text "evaluating code:" <+> mkDoc code
 
     case code of
         CodeEval f local -> stepCodeEval local f
@@ -387,13 +391,14 @@ setCode c = do
     code .= c
 
 updateStackPop :: MachineT UpdateFrame
-updateStackPop = stackPop updateStack StgErrorReturnStackEmpty
+updateStackPop = stackPop updateStack StgErrorUpdateStackEmpty
 
 
 -- TODO: find out how to make this look nicer
 heapUpdateAddress :: Addr -> Closure -> MachineT ()
 heapUpdateAddress addr cls = do
-    appendLog $ text "trying to update heap at address:" <+> mkDoc addr <+> text "with new closure:" <+> mkDoc cls
+    appendLog $ text "updating heap at address:" <+> mkDoc addr <+> text "with closure:" $$
+              nest 4 (text "new closure:" <+> mkDoc cls)
     h <- use heap
     case h ^. at addr of
         Nothing -> do
@@ -406,8 +411,8 @@ heapUpdateAddress addr cls = do
 
 -- | create the standard closure for a constructor
 -- | << (freeVarIds \n {} -> c freeVarIds), consVals >>
-mkConstructorClosure :: Constructor -> [Value] -> Closure
-mkConstructorClosure c consVals = Closure {
+_mkConstructorClosure :: Constructor -> [Value] -> Closure
+_mkConstructorClosure c consVals = Closure {
     _closureLambda = Lambda {
             _lambdaShouldUpdate = False,
             _lambdaBoundVarIdentifiers = [],
@@ -432,7 +437,7 @@ stepCodeUpdatableReturnConstructor cons values = do
     returnStack .= rs
     argumentStack .= as
 
-    let consClosure = mkConstructorClosure cons values
+    let consClosure = _mkConstructorClosure cons values
     heapUpdateAddress addr (consClosure)
 
     return $ MachineStepped
@@ -615,7 +620,7 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
 
 
 
--- | old closure, new closure, argument stack
+-- | old closure, new closure, current argument stack
 -- | we are trying to update the old closure to capture the stuff the new closure
 -- | does. So, we create a closure which executes the new closure's code from the
 -- | old closure's context. Yes this is mind bending.
@@ -623,19 +628,41 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
 -- heap[addr] = old (vs \n xs -> e) ws_f
 -- length (as) < length (xs)
 -- new (vs ++ xs1 \n xs2 -> e) (ws_f ++ as)
--- we add more free variables (as many there were on the current argument stack)
-mkEnterUpdateNewClosure :: Closure -> Closure ->  [Value] -> Closure
-mkEnterUpdateNewClosure old new as = new {
-    _closureFreeVals = ClosureFreeVals (new ^. closureFreeVals . getFreeVals ++ as),
-    _closureLambda = (new ^. closureLambda) {
-        _lambdaFreeVarIdentifiers = oldBound ++ boundToFree,
+-- I now understand what this does: this replaces a partially applied function
+-- with an equivalent function that doesn't need to evaluate the application
+-- That is, write:
+--      f = \x y 
+--      h = f g
+-- as
+--      h = \y where "x" is replaced by "g" in f's body
+--      some form of "partial eta-reduction"
+--
+--      0x2 -> cls: [ {} \u {} -> var:flip {var:tuple} ];
+--      0x2 -> cls: [ {var:f} \n {var:x, var:y} -> var:f {var:y, var:x} | Free variable vals:  val:0x0 ];
+--      Notice how we expanded flip tuple out, and the "tuple" parameter became
+--      a free variable.
+mkEnterUpdateNewClosure :: Closure -> Closure ->  [Value] -> MachineT Closure
+mkEnterUpdateNewClosure toUpdate cur as = do
+  appendLog $ text "updating old closure:" <+> mkDoc toUpdate $$
+              text "with information from closure:" <+> mkDoc cur
+  let nStackArgs = length as
+  let curFreeIds = cur ^. closureLambda ^. lambdaFreeVarIdentifiers
+  -- xs1 ++ xs2 = xs
+  let curBoundIds = cur ^. closureLambda . lambdaBoundVarIdentifiers
+  let (boundToFree, stillBound) = (take nStackArgs curBoundIds, drop nStackArgs curBoundIds)
+
+  appendLog $ text "current all bound variables:" $$ nest 4 ((fmap mkDoc curBoundIds) & sep)
+  appendLog $ text "new bound variables to free:" $$ nest 4 ((fmap mkDoc boundToFree) & sep)
+  appendLog $ text "new free variable values: " $$ nest 4 ((fmap mkDoc as) & sep)
+  appendLog $ text "new bound variables still bound:" $$ nest 4 ((fmap mkDoc stillBound) & sep)
+  
+  return $ cur {
+    _closureFreeVals = ClosureFreeVals (cur ^. closureFreeVals . getFreeVals ++ as),
+    _closureLambda = (cur ^. closureLambda) {
+        _lambdaFreeVarIdentifiers = curFreeIds ++ boundToFree,
         _lambdaBoundVarIdentifiers = stillBound
         }
-    } where
-        nStackArgs = length as
-        oldBound = old ^. closureLambda ^. lambdaBoundVarIdentifiers
-        -- xs1 ++ xs2 = xs
-        (boundToFree, stillBound) = (take nStackArgs oldBound, drop nStackArgs oldBound)
+    }
 
 -- provide the lambda and the list of free variables for binding
 stepCodeEnterIntoNonupdatableClosure :: Addr -> Closure -> MachineT MachineProgress
@@ -646,22 +673,31 @@ stepCodeEnterIntoNonupdatableClosure addr closure = do
     let freeVars = l ^. lambdaFreeVarIdentifiers
     let evalExpr =  l ^. lambdaExprNode
 
-    argStackLength <- use (argumentStack . to stackLength)
+    argStack <- use argumentStack
+    let argStackLength = length argStack
 
     -- we don't have enough arguments to feed the closure, so we pop the update stack
     -- and pull values out
     if argStackLength < length boundVars
     -- we need to pop the update stack
     then do
-        UpdateFrame {
-            _updateFrameAddress=addru,
-            _updateFrameArgumentStack=argStacku,
-            _updateFrameReturnStack=rsu
+        appendLog $ text "insufficient number of arguments on argument stack." $$ (
+          nest 4 (text "needed:" <+> PP.int (length boundVars) <+> text "bound values") $$ 
+            nest 4 (text "had:" <+> PP.int argStackLength <+> text "on argument stack.") $$
+          nest 4 (mkDoc argStack))
+        appendLog $ text "looking for update frame to satisfy arguments..."
+        uf@UpdateFrame {
+              _updateFrameAddress=addru,
+              _updateFrameArgumentStack=argStacku,
+              _updateFrameReturnStack=rsu
         } <- updateStackPop
-        argStackList <- use (argumentStack .  unStack)
+        appendLog $ text "found update frame: " $$ mkDoc uf
 
-        oldClosure <- lookupAddrInHeap addru
-        heapUpdateAddress addru (mkEnterUpdateNewClosure oldClosure closure argStackList)
+        let argStackList =  argStack ^. unStack
+
+        toUpdateClosure <- lookupAddrInHeap addru
+        newClosure <- (mkEnterUpdateNewClosure toUpdateClosure closure argStackList)
+        heapUpdateAddress addru newClosure
 
         returnStack .= rsu
         argumentStack <>= argStacku
