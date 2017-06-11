@@ -5,7 +5,7 @@ module Main where
 
 import StgLanguage
 import StgParser
-import StgMachine
+import StgPushEnterMachine
 import Stg
 -- import StgLLVMBackend
 
@@ -41,7 +41,7 @@ repl = do
           (Left err) -> putStrLn err
           (Right trace) -> putStr . getTraceString $ trace
 
-getTraceString :: ([MachineState], Maybe StgError) -> String
+getTraceString :: ([PushEnterMachineState], Maybe StgError) -> String
 getTraceString (trace, mErr) = 
   traceStr ++ "\n\n\nFinal:\n==================================\n" ++ errStr where
   errStr = case mErr of

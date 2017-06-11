@@ -5,7 +5,7 @@
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE DeriveTraversable #-}
 
-module StgMachine where
+module StgPushEnterMachine where
 import StgLanguage
 
 
@@ -158,7 +158,7 @@ instance Prettyable Log where
 instance Show Log where
     show = renderStyle showStyle . mkDoc
 
-data MachineState = MachineState {
+data PushEnterMachineState = PushEnterMachineState {
     _argumentStack :: !ArgumentStack,
     _returnStack :: !ReturnStack,
     _updateStack :: !UpdateStack,
@@ -170,8 +170,8 @@ data MachineState = MachineState {
 }
 
 
-instance Prettyable MachineState where
-  mkDoc MachineState{..} = 
+instance Prettyable PushEnterMachineState where
+  mkDoc PushEnterMachineState{..} = 
    heading (text "@@@ Steps to reach state:") $$ currentLogDoc $+$
    heading (text "@@@ Code:") $$ code $+$
    heading (text "@@@ Args:") $$ argsDoc $+$
@@ -188,14 +188,14 @@ instance Prettyable MachineState where
     code = _code & mkDoc
     currentLogDoc = _currentLog & mkDoc
 
-instance Show MachineState where
+instance Show PushEnterMachineState where
     show = renderStyle showStyle . mkDoc
 
 data MachineProgress = MachineStepped | MachineHalted deriving(Show, Eq)
 
-newtype MachineT a = MachineT { unMachineT :: ExceptT StgError (State MachineState) a }
+newtype MachineT a = MachineT { unMachineT :: ExceptT StgError (State PushEnterMachineState) a }
             deriving (Functor, Applicative, Monad
-               , MonadState MachineState
+               , MonadState PushEnterMachineState
                , MonadError StgError)
 
 -- | All possible errors when interpreting STG code.
@@ -236,14 +236,14 @@ makeLenses ''ClosureFreeVals
 makePrisms ''Value
 makeLenses ''Closure
 makePrisms ''Code
-makeLenses ''MachineState
+makeLenses ''PushEnterMachineState
 makeLenses ''Addr
 makeLenses ''Continuation
 makeLenses ''Stack
 makeLenses ''UpdateFrame
 
-uninitializedMachineState :: MachineState
-uninitializedMachineState = MachineState {
+uninitializedPushEnterMachineState :: PushEnterMachineState
+uninitializedPushEnterMachineState = PushEnterMachineState {
     _argumentStack=stackEmpty,
     _returnStack = stackEmpty,
     _updateStack = stackEmpty,
@@ -258,7 +258,7 @@ maybeToMachineT :: Maybe a -> StgError -> MachineT a
 maybeToMachineT (Nothing) err = throwError err
 maybeToMachineT (Just a) err = return a 
 
-runMachineT :: MachineT a -> MachineState -> Either StgError (a, MachineState)
+runMachineT :: MachineT a -> PushEnterMachineState -> Either StgError (a, PushEnterMachineState)
 runMachineT machineT state = let (mVal, machineState) = runState (runExceptT . unMachineT $ machineT) state in
                     -- TODO: refactor with fmap
                     case mVal of
@@ -285,8 +285,8 @@ gVarNamesToIntIntrinsics = M.fromList $ [(VarName "plus#", (+))]
 
 -- allocate the bindings on the heap, and return the mapping
 -- between variable names to addresses
-compileProgram :: Program -> Either StgError MachineState
-compileProgram prog = snd <$> (runMachineT setupBindings uninitializedMachineState)
+compileProgram :: Program -> Either StgError PushEnterMachineState
+compileProgram prog = snd <$> (runMachineT setupBindings uninitializedPushEnterMachineState)
   where
     setupBindings :: MachineT ()
     setupBindings = do 
@@ -303,8 +303,8 @@ isExprPrimitive :: ExprNode -> Bool
 isExprPrimitive (ExprNodeInt _) = True
 isExprPrimitive _ = False
 
-isMachineStateFinal :: MachineState -> Bool
-isMachineStateFinal m = case m ^. code of
+isPushEnterMachineStateFinal :: PushEnterMachineState -> Bool
+isPushEnterMachineStateFinal m = case m ^. code of
                           (CodeEval expr _) -> isExprPrimitive expr
                           _ -> False
 
@@ -469,8 +469,8 @@ stepCodeNonUpdatableReturnConstructor cons values = do
       return MachineStepped
 
 
-shouldUseUpdatableStepForReturnConstructor :: MachineState -> Bool
-shouldUseUpdatableStepForReturnConstructor MachineState {..} = length _argumentStack == 0 &&
+shouldUseUpdatableStepForReturnConstructor :: PushEnterMachineState -> Bool
+shouldUseUpdatableStepForReturnConstructor PushEnterMachineState {..} = length _argumentStack == 0 &&
                                                        length _returnStack == 0 &&
                                                        length _updateStack > 0
 
@@ -549,7 +549,7 @@ stepCodeEvalLet locals isLetRecursive bindings inExpr = do
   return MachineStepped
 
 
-stackPushN :: Lens' MachineState (Stack a) -> [a] -> MachineT ()
+stackPushN :: Lens' PushEnterMachineState (Stack a) -> [a] -> MachineT ()
 stackPushN stackLens as'  = do
             as <- use (stackLens . unStack)
             stackLens .= Stack (as' ++ as)
@@ -736,7 +736,7 @@ caseAltsGetUniqueMatch pats val =
       [alt] -> Just (Right alt)
       alts -> Just (Left (StgErrorCaseAltsOverlappingPatterns))
 
-stackPop :: Lens' MachineState (Stack a) -> StgError -> MachineT a
+stackPop :: Lens' PushEnterMachineState (Stack a) -> StgError -> MachineT a
 stackPop stacklens err = do
   isempty <- use (stacklens . to null)
   if isempty
@@ -773,7 +773,7 @@ stepCodeReturnInt i = do
   setCode $  CodeEval (alt ^. caseAltRHS) (cont ^. continuationEnv)
   return MachineStepped
 
-genMachineTrace :: MachineState -> ([MachineState], Maybe StgError)
+genMachineTrace :: PushEnterMachineState -> ([PushEnterMachineState], Maybe StgError)
 genMachineTrace state = 
   case runMachineT stepMachine state of
       Left err -> ([], Just err)
@@ -782,10 +782,10 @@ genMachineTrace state =
                                  else let (traceNext, err) = genMachineTrace state' in 
                                       (state':traceNext, err)
 
-genFinalMachineState :: MachineState -> Either StgError MachineState
-genFinalMachineState state =
+genFinalPushEnterMachineState :: PushEnterMachineState -> Either StgError PushEnterMachineState
+genFinalPushEnterMachineState state =
     case runMachineT stepMachine state of
       Left err -> Left err
       Right (progress, state') -> if progress == MachineHalted
                                     then Right state'
-                                    else genFinalMachineState state'
+                                    else genFinalPushEnterMachineState state'

@@ -2,7 +2,7 @@ module Stg where
 
 import StgLanguage
 import StgParser
-import StgMachine
+import StgPushEnterMachine
 import qualified Text.Megaparsec as P
 -- import StgLLVMBackend
 
@@ -29,6 +29,6 @@ parseString str = let
   in
     mParsed
 
-tryCompileString :: String -> Either ErrorString MachineState
+tryCompileString :: String -> Either ErrorString PushEnterMachineState
 tryCompileString str =  squashFrontendErrors $ compileProgram <$> parseString str
 

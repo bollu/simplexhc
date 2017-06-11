@@ -17,7 +17,7 @@ library
   hs-source-dirs:      src
   exposed-modules:     StgLanguage,
                        StgParser,
-                       StgMachine,
+                       StgPushEnterMachine,
                        Stg,
                        ColorUtils
                        -- StgLLVMBackend,
