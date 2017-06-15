@@ -16,7 +16,7 @@ import Data.Map.Lens
 
 import StgLanguage
 import StgParser
-import StgMachine
+import StgPushEnterMachine
 import Stg
 
 import System.Directory
@@ -28,7 +28,7 @@ import Data.Either
 mkBoxedNumberString :: Int -> String
 mkBoxedNumberString i = "Int { " ++  (show i) ++ "#" ++ "  }"
 
-extractBoxedNumber :: MachineState -> Maybe Int
+extractBoxedNumber :: PushEnterMachineState -> Maybe Int
 extractBoxedNumber state = (state ^. code ^? _CodeEval) >>= getFnApplication where
   -- Eval (x {})  ({ x -> #3 })
   getFnApplication :: (ExprNode, LocalEnvironment) -> Maybe Int
@@ -81,7 +81,7 @@ runSamplesTest = testCase  "running samples" $ do
     mRuns <- forM programFiles (\f -> do 
                                         contents <- readFile $ "./stg-programs/" ++ f
                                         let mState = doesStgProgramSucceedRun contents
-                                        return (f, mState)) :: IO [(FilePath, Either ErrorString MachineState)]
+                                        return (f, mState)) :: IO [(FilePath, Either ErrorString PushEnterMachineState)]
     let mErrors = filter (isLeft . snd)  mRuns
 
     if length mErrors == 0 then
@@ -97,7 +97,7 @@ runSamplesTest = testCase  "running samples" $ do
 
 
 
-doesStgProgramSucceedRun :: String -> Either ErrorString MachineState
+doesStgProgramSucceedRun :: String -> Either ErrorString PushEnterMachineState
 doesStgProgramSucceedRun s = 
   case tryCompileString s of
     Left err -> Left err
