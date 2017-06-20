@@ -1,5 +1,5 @@
 define id = {} \n {x} -> x {};
 
-define main = {} \n {} -> case ( 10# ) of
+define main = {} \n {} -> case 10#  of
                             4# -> id {5#};
                             10# -> id {11#};

@@ -39,6 +39,7 @@ varNamep = do
     c <- lower
     rest <- many (alphaNum <|> oneOf ['_', '-'])
     possibly_end <- optional (oneOf ['?', '#'])
+    spaces
     return $ VarName $ 
       case possibly_end of 
                 Just end -> (c:rest) ++ [end]
@@ -48,19 +49,23 @@ stgIntp :: Parser StgInt
 stgIntp = do
   number <- integer
   char '#'
+  spaces
   return $ StgInt (fromIntegral number)
 
 constructorNamep :: Parser ConstructorName
 constructorNamep = do
   c <- upper
   rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
+  spaces
   return $ ConstructorName (c:rest)
 
 
 updatep :: Parser Bool
 updatep = do
     char '\\'
-    (const True <$> char 'u') <|> (const False <$> char 'n')
+    isUpdatable <- (const True <$> char 'u') <|> (const False <$> char 'n')
+    spaces
+    return isUpdatable
 
 
 atomp :: Parser Atom
@@ -94,7 +99,9 @@ applicationp = do
 -- let(rec) parser: ("let" | "letrec") (<binding> ";")+ "in" <expr>
 letp :: Parser ExprNode
 letp = do
-  isLetRecursive <- (const LetNonRecursive <$> symbol "let" ) <|> (const LetRecursive <$> symbol "letrec")
+  -- isLetRecursive <- (const LetNonRecursive <$> symbol "let" ) <|> (const LetRecursive <$> symbol "letrec")
+  symbol "let"
+  let isLetRecursive = LetNonRecursive
   bindings <- sepEndBy bindingp (symbol ";")
   symbol "in"
   inExpr <- exprp
@@ -134,9 +141,9 @@ casep = do
 
 parenExprp :: Parser ExprNode
 parenExprp = do
-          symbol "{"
+          symbol "("
           expr <- exprp
-          symbol "}"
+          symbol ")"
           return expr
 
 constructorp :: Parser ExprNode
@@ -148,13 +155,14 @@ constructorp = do
 
 
 exprp :: Parser ExprNode
-exprp = applicationp <|>
-        letp <|>
-        constructorp <|>
+exprp = 
+        try letp <|>
+        try applicationp <|>
+        try constructorp <|>
         -- FIXME: factor out "try" into a separate thing
-        casep <|>
-        (ExprNodeInt <$> stgIntp) <|>
-        parenExprp
+        try casep <|>
+        try (ExprNodeInt <$> stgIntp) <|>
+        try parenExprp
 
 
 -- VarName list: {" id1 "," id2 "," .. idn "} | "{}"
@@ -198,7 +206,7 @@ stgp = sepEndBy1 definep (symbol ";") where
       bindingp
 
 parseStg :: String -> Result Program
-parseStg string = TR.parseString stgp (Directed (BS.pack string) 0 0 0 0) string
+parseStg string = TR.parseString (spaces *> stgp) (Directed (BS.pack string) 0 0 0 0) string
 
 parseExpr :: String -> Result ExprNode
-parseExpr string = TR.parseString exprp (Directed (BS.pack string) 0 0 0 0) string
+parseExpr string = TR.parseString (spaces *> exprp) (Directed (BS.pack string) 0 0 0 0) string

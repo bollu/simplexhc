@@ -1,3 +1,3 @@
-define main =  {} \n {} -> letrec 
+define main =  {} \n {} -> let
                              id = {} \n {x} -> x {}
                             in id { 1# };
