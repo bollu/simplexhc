@@ -32,9 +32,14 @@ library
                        MissingH,
                        bytestring,
                        mtl,
+                       -- for my own use.
                        pretty,
+                       -- for trifecta
+                       ansi-wl-pprint,
                        hoist-error,
-                       ansi-terminal
+                       ansi-terminal,
+                       parsers,
+                       trifecta
                        -- llvm-hs >= 4.1.0,
                        -- llvm-hs-pure >= 4.1.0
 

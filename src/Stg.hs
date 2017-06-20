@@ -3,15 +3,13 @@ module Stg where
 import StgLanguage
 import StgParser
 import StgPushEnterMachine
-import qualified Text.Megaparsec as P
+import Text.Trifecta as TR
+-- note that this is a trifecta dependency
+import qualified Text.PrettyPrint.ANSI.Leijen as PP
 -- import StgLLVMBackend
+--
 
 type ErrorString = String
-
-stringifyMegaparsecError :: (Ord a, P.ShowToken a) => Either (P.ParseError a P.Dec) b -> Either ErrorString b
-stringifyMegaparsecError e = case e of 
-                               Left err -> Left (P.parseErrorPretty err)
-                               Right a -> Right a 
 
 squashFrontendErrors :: Either ErrorString (Either StgError a) -> Either ErrorString a
 squashFrontendErrors val = 
@@ -21,14 +19,10 @@ squashFrontendErrors val =
       (Right (Right a)) -> Right a
 
 parseString :: String -> Either ErrorString Program
-parseString str = let
-    mTokens :: Either ErrorString [Token]
-    mTokens = stringifyMegaparsecError (tokenize str)
-    mParsed :: Either ErrorString Program
-    mParsed = mTokens >>= stringifyMegaparsecError . parseStg
-  in
-    mParsed
+parseString str = case parseStg str of
+                      Success a -> Right a
+                      Failure ErrInfo{ _errDoc = e } -> Left (PP.displayS (PP.renderPretty 0.8 80 e) "")
 
 tryCompileString :: String -> Either ErrorString PushEnterMachineState
-tryCompileString str =  squashFrontendErrors $ compileProgram <$> parseString str
+tryCompileString str =  squashFrontendErrors $ compileProgram <$> Stg.parseString str
 

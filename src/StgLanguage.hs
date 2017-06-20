@@ -61,80 +61,6 @@ instance Prettyable RawNumber where
 instance Show RawNumber where
     show = renderStyle showStyle . mkDoc
 
-data TokenType = TokenTypePlus | 
-                 TokenTypeMinus | 
-                 TokenTypeDiv | 
-                 TokenTypeMultiply | 
-                 TokenTypeVarName !VarName | 
-                 TokenTypeConstructorName !ConstructorName | 
-                 TokenTypeLet |
-                 TokenTypeLetrec |
-                 TokenTypeIn |
-                 TokenTypeCase |
-                 TokenTypeOf |
-                 TokenTypeDefine |
-                 TokenTypeUpdate !Bool | -- true: should update, false: no update
-                 TokenTypeThinArrow |
-                 TokenTypeFatArrow |
-                 TokenTypeSemicolon |
-                 TokenTypeOpenBrace |
-                 TokenTypeCloseBrace |
-                 -- | '('
-                 TokenTypeOpenParen |
-                 -- | ')'
-                 TokenTypeCloseParen |
-                 TokenTypeComma |
-                 TokenTypeEquals | 
-                 TokenTypeRawNumber !RawNumber deriving(Eq, Ord)
-
-
-instance Show TokenType where
-  show TokenTypePlus = "+"
-  show TokenTypeMinus = "-"
-  show TokenTypeDiv = "/"
-  show TokenTypeMultiply = "*"
-  show (TokenTypeVarName var) = show var
-  show (TokenTypeConstructorName name) = show name
-  show (TokenTypeRawNumber num) = show num
-  show TokenTypeLet = "let"
-  show TokenTypeLetrec = "letrec"
-  show TokenTypeIn = "in"
-  show TokenTypeCase = "case"
-  show TokenTypeOf = "of"
-  show TokenTypeDefine = "define"
-  show (TokenTypeUpdate b) = "\\" ++ (if b then "u" else "n")
-  show TokenTypeThinArrow = "->"
-  show TokenTypeFatArrow = "=>"
-  show TokenTypeEquals = "="
-  show TokenTypeSemicolon = ";"
-  show TokenTypeOpenBrace = "{"
-  show TokenTypeCloseBrace = "}"
-  show TokenTypeOpenParen = "("
-  show TokenTypeCloseParen = ")"
-  show TokenTypeComma = "}"
-
-
-instance Prettyable TokenType where
-    mkDoc = text . show
-  
-data Token = Token {
-  _tokenType :: !TokenType
-  -- HACK: for now, remove this and just use semi valid position given by the function
-  -- in updatePos.
-  -- , _tokenPos :: (P.Pos.SourcePos, P.Pos.SourcePos)
-} deriving(Eq, Ord)
-
-
-instance Prettyable Token where
-    mkDoc (Token{..}) = (mkDoc _tokenType) 
-
-instance (Show Token) where
-    show = renderStyle showStyle . mkDoc
-
-instance P.ShowToken Token where
-    showTokens :: NE.NonEmpty Token -> String
-    showTokens xs = renderStyle showStyle (hcat (fmap mkDoc (NE.toList xs)))
-
 newtype StgInt = StgInt { unStgInt :: Int } deriving(Show, Eq)
 
 instance Prettyable StgInt where
@@ -165,7 +91,18 @@ instance Show Constructor where
 
 data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
-data ExprNode = ExprNodeBinop !ExprNode !Token !ExprNode |
+
+data BinaryOperator = Plus | Minus | Multiply | Divide deriving(Eq)
+instance Show BinaryOperator where
+  show Plus = "+"
+  show Minus = "-"
+  show Multiply = "*"
+  show Divide = "/"
+
+instance Prettyable BinaryOperator where
+    mkDoc = text . show
+
+data ExprNode = ExprNodeBinop !ExprNode !BinaryOperator !ExprNode |
                ExprNodeFnApplication !VarName ![Atom] |
                ExprNodeConstructor !Constructor |
                ExprNodeLet !IsLetRecursive ![Binding] !ExprNode |
@@ -237,13 +174,11 @@ instance Show Lambda where
     show = renderStyle showStyle . mkDoc
 
 
-makeLenses ''Token
 makeLenses ''Binding
 makeLenses ''Lambda
 makeLenses ''CaseAlt
 makeLenses ''Atom
 makePrisms ''ExprNode
-makePrisms ''TokenType
 makePrisms ''CaseAltType
 makeLenses ''VarName
 makeLenses ''Constructor
@@ -254,7 +189,7 @@ instance Prettyable ExprNode where
         (mkDoc fnName) <+>
         (map mkDoc atoms & punctuate comma & hsep & braces)
 
-    mkDoc (ExprNodeBinop eleft tok eright) = (tok ^. tokenType ^. to mkDoc)  <+>
+    mkDoc (ExprNodeBinop eleft tok eright) = (mkDoc tok)  <+>
                                              (mkDoc eleft) <+>
                                              (mkDoc eright)
     mkDoc (ExprNodeLet isrecursive bindings expr) = 

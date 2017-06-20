@@ -11,138 +11,59 @@ import StgLanguage
 
 import Control.Monad (void)
 
-import Text.Megaparsec.Char
--- import Text.Megaparsec.String
-import Text.Megaparsec as P
-import Text.Megaparsec.Pos as P.Pos
-import Text.Megaparsec.Expr
 import Data.Set as Set
 import Data.List.NonEmpty
-import qualified Text.Megaparsec.Lexer as L
+
+import Control.Applicative
 
 import Control.Lens
 import Control.Monad.Error.Hoist
 
-type StgTokenizer a = Parsec Dec String a
+import Text.Trifecta as TR
+import Text.Parser.Token.Highlight
+import Text.Parser.Token.Style
+import Text.Trifecta.Delta
 
-newtype StgTokenStream = StgTokenStream [StgLanguage.Token]
 
-instance  P.Stream StgTokenStream where
-  type Token StgTokenStream = StgLanguage.Token
 
-  uncons (StgTokenStream []) = Nothing
-  uncons (StgTokenStream (x:xs)) = Just (x, StgTokenStream xs)
+import Text.Parser.Char
+import Text.Parser.Combinators
+import Text.Parser.Token
 
-  updatePos _ _ current tok = (current, current)
+import Data.ByteString.Char8 as BS
 
-type StgParser a = Parsec Dec StgTokenStream a
 
-sc :: StgTokenizer () -- ‘sc’ stands for “space consumer”
-sc = L.space (void spaceChar) lineComment blockComment
-  where lineComment  = L.skipLineComment "//"
-        blockComment = L.skipBlockComment "/*" "*/"
 
-lexeme :: StgTokenizer a -> StgTokenizer a
-lexeme = L.lexeme sc
-
-symbol :: String -> StgTokenizer String
-symbol = L.symbol sc
-
-varNameTokenizer :: StgTokenizer VarName
-varNameTokenizer = lexeme $ do
-    c <- lowerChar
-    rest <- many (alphaNumChar <|> oneOf ['_', '-'])
+varNamep :: Parser VarName
+varNamep = do
+    c <- lower
+    rest <- many (alphaNum <|> oneOf ['_', '-'])
     possibly_end <- optional (oneOf ['?', '#'])
     return $ VarName $ 
       case possibly_end of 
                 Just end -> (c:rest) ++ [end]
                 Nothing -> (c:rest)
 
-numberTokenizer :: StgTokenizer TokenType
-numberTokenizer = lexeme $ do
-  number <- lexeme L.integer
-  hash <- char '#'
-  return $ TokenTypeRawNumber (RawNumber . show $ number)
-
-constructorTokenizer :: StgTokenizer TokenType
-constructorTokenizer = lexeme $ do
-  c <- upperChar
-  rest <- many (alphaNumChar <|> oneOf ['_', '-', '?'])
-  return $ TokenTypeConstructorName (ConstructorName (c:rest))
-
-identifierLikeTokenizer :: StgTokenizer TokenType
-identifierLikeTokenizer = do
-    var <- varNameTokenizer
-    return $ case var ^. getVariable of
-                "define" -> TokenTypeDefine
-                "of" -> TokenTypeOf
-                "case" -> TokenTypeCase
-                "let" -> TokenTypeLet
-                "letrec" -> TokenTypeLetrec
-                "in" -> TokenTypeIn
-                _ -> TokenTypeVarName var
-
-updatetokenizer :: StgTokenizer TokenType
-updatetokenizer = do
-    char '\\'
-    update_or_no <- oneOf ['u', 'n']
-    case update_or_no of
-        'u' -> return (TokenTypeUpdate True)
-        'n' -> return (TokenTypeUpdate False)
-        _ -> undefined
-
-
-
-glyphTokenizer :: StgTokenizer TokenType
-glyphTokenizer = do
-    let thinArrow = makeSymbolTokenizer "->" TokenTypeThinArrow
-    let fatArrow = makeSymbolTokenizer "=>" TokenTypeFatArrow
-    let equals = makeSymbolTokenizer "=" TokenTypeEquals
-    let semicolon = makeSymbolTokenizer ";" TokenTypeSemicolon
-    let openbrace = makeSymbolTokenizer "{" TokenTypeOpenBrace
-    let closebrace = makeSymbolTokenizer "}" TokenTypeCloseBrace
-    let openParen = makeSymbolTokenizer "(" TokenTypeOpenParen
-    let closeParen = makeSymbolTokenizer ")" TokenTypeCloseParen
-    let comma = makeSymbolTokenizer "," TokenTypeComma
-    (thinArrow <|> try fatArrow <|>  equals <|> semicolon <|>
-     openbrace <|> closebrace <|> comma <|>
-     openParen <|> closeParen)
-    where
-        makeSymbolTokenizer :: String -> TokenType -> StgTokenizer TokenType
-        makeSymbolTokenizer str tokenType = fmap (const tokenType) (string str) 
-
-
-tokenizer :: StgTokenizer StgLanguage.Token
-tokenizer = StgLanguage.Token <$> (constructorTokenizer <|> identifierLikeTokenizer <|> numberTokenizer <|> try glyphTokenizer <|> updatetokenizer)
-
-tokenize :: String -> Either (ParseError Char Dec) [StgLanguage.Token]
-tokenize input = P.runParser (sc *> many (tokenizer <* sc)) "tokenizer" input
-
-
--- Tokens lifted to parsers
-
-istoken :: (TokenType -> Maybe a) -> StgParser a
-istoken pred = token test Nothing where
-  test x = case pred (_tokenType x) of
-             Just a -> Right a
-             Nothing -> Left (Set.singleton (Tokens (x:|[])), Set.empty, Set.empty)
-
-  nextpos :: Int -> SourcePos -> StgLanguage.Token -> SourcePos
-  nextpos _ pos _ = pos -- HACK: need to fix this
-
-
-varNamep :: StgParser VarName
-varNamep = istoken (^? _TokenTypeVarName)
-
-stgIntp :: StgParser StgInt
+stgIntp :: Parser StgInt
 stgIntp = do
-           raw <- istoken (^? _TokenTypeRawNumber)
-           return $ StgInt (raw ^. getRawNumber & read)
+  number <- integer
+  char '#'
+  return $ StgInt (fromIntegral number)
 
-updatep :: StgParser Bool
-updatep = istoken (^? _TokenTypeUpdate)
+constructorNamep :: Parser ConstructorName
+constructorNamep = do
+  c <- upper
+  rest <- many (alphaNum <|> oneOf ['_', '-', '?'])
+  return $ ConstructorName (c:rest)
 
-atomp :: StgParser Atom
+
+updatep :: Parser Bool
+updatep = do
+    char '\\'
+    (const True <$> char 'u') <|> (const False <$> char 'n')
+
+
+atomp :: Parser Atom
 atomp = identp <|> numberp
     where
         identp = AtomVarName <$> varNamep
@@ -150,91 +71,83 @@ atomp = identp <|> numberp
 
 
 
-semicolonp :: StgParser ()
-semicolonp = istoken (^? _TokenTypeSemicolon)
-
-commap :: StgParser ()
-commap = istoken (^? _TokenTypeComma)
-
 -- Parse stuff inside braces, with commas on the inside
 -- "{" <stuff> "}"
-bracesp :: StgParser a -> StgParser a
-bracesp = between (istoken (^? _TokenTypeOpenBrace)) (istoken (^? _TokenTypeCloseBrace))
+bracesp :: Parser a -> Parser a
+bracesp = between (symbol "{") (symbol "}")
 
 -- "{" atom1, atom2 .. atomn "}" | {}
-atomListp :: StgParser [Atom]
+atomListp :: Parser [Atom]
 atomListp = do
-    atoms <- bracesp (sepEndBy atomp  commap)
-    return atoms
+  atoms <- bracesp (sepEndBy atomp  (symbol ","))
+  return atoms
 
 -- Function application: fn_name "{" atom1 "," atom2 ... "}" | {}
-applicationp :: StgParser ExprNode
+applicationp :: Parser ExprNode
 applicationp = do
         fn_name <- varNamep
         atoms <- atomListp
         return $ ExprNodeFnApplication fn_name atoms
 
+
+
 -- let(rec) parser: ("let" | "letrec") (<binding> ";")+ "in" <expr>
-letp :: StgParser ExprNode
+letp :: Parser ExprNode
 letp = do
-  isLetRecursive <- istoken (\case 
-                                    TokenTypeLet -> Just LetNonRecursive
-                                    TokenTypeLetrec -> Just LetRecursive
-                                    _ -> Nothing
-                                   )
-  bindings <- sepEndBy bindingp semicolonp
-  istoken (^? _TokenTypeIn)
+  isLetRecursive <- (const LetNonRecursive <$> symbol "let" ) <|> (const LetRecursive <$> symbol "letrec")
+  bindings <- sepEndBy bindingp (symbol ";")
+  symbol "in"
   inExpr <- exprp
   return $ ExprNodeLet isLetRecursive bindings inExpr
 
 
 
-caseConstructorAltp :: StgParser CaseAltType
+caseConstructorAltp :: Parser CaseAltType
 caseConstructorAltp = do
-  consname <- istoken (^? _TokenTypeConstructorName)  
+  consname <- constructorNamep
   consvars <- variableListp
-  istoken (^? _TokenTypeThinArrow)
+  symbol "->"
   rhs <- exprp
   let patternMatch = ConstructorPatternMatch consname consvars
   
   return $ CaseAltConstructor (CaseAlt patternMatch rhs)
 
-caseStgIntAltp :: StgParser CaseAltType
+caseStgIntAltp :: Parser CaseAltType
 caseStgIntAltp = do
   num <- stgIntp
-  istoken (^? _TokenTypeThinArrow)
+  symbol "->"
   rhs <- exprp
   return $ CaseAltInt (CaseAlt num rhs)
   
 
-caseAltp :: StgParser CaseAltType
+caseAltp :: Parser CaseAltType
 caseAltp = caseConstructorAltp <|> caseStgIntAltp
 
-casep :: StgParser ExprNode
+casep :: Parser ExprNode
 casep = do
-  istoken (^? _TokenTypeCase)
+  symbol "case"
   e <- exprp
-  istoken (^? _TokenTypeOf)
-  alts <- sepEndBy1 caseAltp semicolonp
+  symbol "of"
+  alts <- sepEndBy1 caseAltp (symbol ";")
   return $ ExprNodeCase e alts
 
 
-parenExprp :: StgParser ExprNode
+parenExprp :: Parser ExprNode
 parenExprp = do
-          istoken (^? _TokenTypeOpenParen)
+          symbol "{"
           expr <- exprp
-          istoken (^? _TokenTypeCloseParen)
+          symbol "}"
           return expr
 
-constructorp :: StgParser ExprNode
+constructorp :: Parser ExprNode
 constructorp = do
-  consName <- istoken (^? _TokenTypeConstructorName)
+  consName <- constructorNamep
   params <- atomListp
 
-  return $ ExprNodeConstructor (Constructor consName params)
+  return $ ExprNodeConstructor (StgLanguage.Constructor consName params)
 
 
-exprp :: StgParser ExprNode
+exprp :: Parser ExprNode
 exprp = applicationp <|>
         letp <|>
         constructorp <|>
@@ -245,21 +158,20 @@ exprp = applicationp <|>
 
 
 -- VarName list: {" id1 "," id2 "," .. idn "} | "{}"
-variableListp ::StgParser [VarName]
+variableListp ::Parser [VarName]
 variableListp = do
-    idents <- bracesp (sepEndBy varNamep  commap)
-    return idents
+  bracesp (sepEndBy varNamep (symbol ","))
 
 
 -- Lambda form
 -- <free vars> <should update> <bound vars> "->" <expr>
 -- {x y} \n {z}  -> f x y z
-lambdap :: StgParser Lambda
+lambdap :: Parser Lambda
 lambdap = do
     freeVars <- variableListp
     shouldUpdate <- updatep
     boundVars <- variableListp
-    istoken (^? _TokenTypeThinArrow)
+    symbol "->"
     rhs <- exprp
     return Lambda {
         _lambdaShouldUpdate = shouldUpdate,
@@ -270,24 +182,23 @@ lambdap = do
 
 
 --  <name> = <lambdaform>
-bindingp :: StgParser Binding
+bindingp :: Parser Binding
 bindingp = do
-  -- istoken (^? _TokenTypeDefine)
   name <- varNamep
-  istoken (^? _TokenTypeEquals)
+  symbol "="
   lambda <- lambdap
   return $ Binding name lambda
 
 
 
-stgp :: StgParser Program
-stgp = sepEndBy1 definep semicolonp where
+stgp :: Parser Program
+stgp = sepEndBy1 definep (symbol ";") where
     definep = do
-                istoken (^? _TokenTypeDefine)
-                bindingp
+      symbol "define"
+      bindingp
 
-parseStg :: [StgLanguage.Token] -> Either (ParseError StgLanguage.Token Dec) Program
-parseStg tokens = P.runParser stgp "parserStgProgram" (StgTokenStream tokens)
+parseStg :: String -> Result Program
+parseStg string = TR.parseString stgp (Directed (BS.pack string) 0 0 0 0) string
 
-parseExpr :: [StgLanguage.Token] -> Either (ParseError (P.Token StgTokenStream) Dec) ExprNode
-parseExpr tokens = P.runParser exprp "parserStgExpr" (StgTokenStream tokens)
+parseExpr :: String -> Result ExprNode
+parseExpr string = TR.parseString exprp (Directed (BS.pack string) 0 0 0 0) string
