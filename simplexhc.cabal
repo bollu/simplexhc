@@ -40,9 +40,9 @@ library
                        ansi-terminal,
                        parsers,
                        trifecta,
-                       unordered-containers
-                       -- llvm-hs >= 4.1.0,
-                       -- llvm-hs-pure >= 4.1.0
+                       unordered-containers,
+                       llvm-hs >= 4.1.0,
+                       llvm-hs-pure >= 4.1.0
 
   extra-lib-dirs:      /usr/local/lib
   -- extra-libraries:     lowering
