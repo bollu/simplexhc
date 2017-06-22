@@ -36,16 +36,41 @@ extractBoxedNumber state = (state ^. code ^? _CodeEval) >>= getFnApplication whe
   getFnApplication _ = Nothing
 
 
-main = defaultMain tests
+-- main = defaultMain tests
+
+
+stgProgramsResource :: IO [(FilePath, String)]
+stgProgramsResource = do
+      programFiles <- listDirectory "./stg-programs/"
+      forM programFiles $ \f -> do
+                                contents <- readFile $ "./stg-programs/" ++ f
+                                return (f, contents)
+
+mkTestFromFileData :: FilePath -> String -> TestTree
+mkTestFromFileData filepath contents = testCase ("running " ++ show filepath) $ do
+  let mState = doesStgProgramSucceedRun contents
+  case mState of
+    Left e -> do
+                assertFailure $  "error: " ++ e
+    Right _ -> return ()
+
+main :: IO ()
+main = do
+  filesWithContents <- stgProgramsResource
+  let tests = fmap (uncurry mkTestFromFileData) filesWithContents
+  let group = testGroup "example programs" tests
+  defaultMain group
+
+
+{-
 
 tests :: TestTree
 tests = testGroup "Tests" [runSamplesTest]
 
 
-{-
 
 stgProgramsResource :: ResourceSpec [(FilePath, String)]
-stgProgramsResource = ResourceSpec (acquirer, releaser) where
+stgProgramsResource = ResourceSpec (acquirer, ruleaser) where
     acquirer = do
       programFiles <- listDirectory "./stg-programs/"
       forM programFiles (\f -> do 
