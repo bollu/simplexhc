@@ -47,7 +47,7 @@ stgProgramsResource = do
                                 return (f, contents)
 
 mkTestFromFileData :: FilePath -> String -> TestTree
-mkTestFromFileData filepath contents = testCase ("running " ++ show filepath) $ do
+mkTestFromFileData filepath contents = testCase ("running " ++ filepath) $ do
   let mState = doesStgProgramSucceedRun contents
   case mState of
     Left e -> do
@@ -60,66 +60,6 @@ main = do
   let tests = fmap (uncurry mkTestFromFileData) filesWithContents
   let group = testGroup "example programs" tests
   defaultMain group
-
-
-{-
-
-tests :: TestTree
-tests = testGroup "Tests" [runSamplesTest]
-
-
-
-stgProgramsResource :: ResourceSpec [(FilePath, String)]
-stgProgramsResource = ResourceSpec (acquirer, ruleaser) where
-    acquirer = do
-      programFiles <- listDirectory "./stg-programs/"
-      forM programFiles (\f -> do 
-                                          contents <- readFile $ "./stg-programs/" ++ f
-                                          return (f, contents)
-                                 )
-    
-    releaser = const (return ())
-
-createStgProgramTestCase :: (FilePath, String) -> TestTree
-createStgProgramTestCase (path, program) = testCase path assertion
-    let mState = doesStgProgramSucceedRun contents
-    in
-    assertion = if isLeft mState 
-                then do
-                    putStr "\n"
-                    putStrLn ("File: " ++ path)
-                    putStrLn "Error: "
-                    putStr err
-                    assertFailure "execution failed."
-                else do
-                  putrStrLn $ path ++ " ran successfully"
-
-
-runSamplesTest :: TestTree
-runSamplesTest = WithResource stgProgramsResource 
-
--}
-
-runSamplesTest :: TestTree
-runSamplesTest = testCase  "running samples" $ do
-    programFiles <- listDirectory "./stg-programs/"
-    mRuns <- forM programFiles (\f -> do 
-                                        contents <- readFile $ "./stg-programs/" ++ f
-                                        let mState = doesStgProgramSucceedRun contents
-                                        return (f, mState)) :: IO [(FilePath, Either ErrorString PushEnterMachineState)]
-    let mErrors = filter (isLeft . snd)  mRuns
-
-    if length mErrors == 0 then
-      return ()
-    else do
-      forM_ mErrors (\(f, Left err) -> do
-          putStr "\n"
-          putStrLn ("file: " ++ f)
-          putStrLn "error: "
-          putStr err)
-
-      assertFailure "program executions failed"
-
 
 
 doesStgProgramSucceedRun :: String -> Either ErrorString PushEnterMachineState
