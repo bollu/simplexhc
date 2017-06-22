@@ -39,7 +39,8 @@ library
                        hoist-error,
                        ansi-terminal,
                        parsers,
-                       trifecta
+                       trifecta,
+                       unordered-containers
                        -- llvm-hs >= 4.1.0,
                        -- llvm-hs-pure >= 4.1.0
 
