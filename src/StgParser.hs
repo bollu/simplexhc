@@ -62,9 +62,7 @@ constructorNamep = do
 
 updatep :: Parser Bool
 updatep = do
-    char '\\'
-    isUpdatable <- (const True <$> char 'u') <|> (const False <$> char 'n')
-    spaces
+    isUpdatable <- (try (const True <$> symbol "\\u")) <|> (const False <$> symbol "\\n")
     return isUpdatable
 
 
@@ -84,7 +82,7 @@ bracesp = between (symbol "{") (symbol "}")
 -- "{" atom1, atom2 .. atomn "}" | {}
 atomListp :: Parser [Atom]
 atomListp = do
-  atoms <- bracesp (sepEndBy atomp  (symbol ","))
+  atoms <- braces (sepBy atomp  (symbol ","))
   return atoms
 
 -- Function application: fn_name "{" atom1 "," atom2 ... "}" | {}
@@ -102,7 +100,7 @@ letp = do
   -- isLetRecursive <- (const LetNonRecursive <$> symbol "let" ) <|> (const LetRecursive <$> symbol "letrec")
   symbol "let"
   let isLetRecursive = LetNonRecursive
-  bindings <- sepEndBy bindingp (symbol ";")
+  bindings <- sepEndBy1 bindingp (symbol ";")
   symbol "in"
   inExpr <- exprp
   return $ ExprNodeLet isLetRecursive bindings inExpr
@@ -155,7 +153,7 @@ constructorp = do
 
 
 exprp :: Parser ExprNode
-exprp = 
+exprp =
         try letp <|>
         try applicationp <|>
         try constructorp <|>
