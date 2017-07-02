@@ -79,6 +79,17 @@ data Binding = Binding {
 type Program = [Binding]
 
 
+
+collectBindingsInExpr :: ExprNode -> [Binding]
+collectBindingsInExpr (ExprNodeBinop l _ r) = collectBindingsInExpr l ++ collectBindingsInExpr r
+collectBindingsInExpr (ExprNodeLet _ bindings expr) = bindings ++ collectBindingsInExpr expr
+collectBindingsInExpr (ExprNodeCase case' alts) = collectBindingsInExpr case' 
+collectBindingsInExpr (ExprNodeInt _ ) = []
+collectBindingsInExpr (ExprNodeFnApplication _ _) = []
+
+collectBindingsInBinding :: Binding -> [Binding]
+collectBindingsInBinding (Binding _ lambda) = collectBindingsInExpr . _lambdaExprNode $ lambda
+
 data Constructor = Constructor { _constructorName :: !ConstructorName,
                                  _constructorAtoms :: ![Atom]
                                }

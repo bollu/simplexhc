@@ -6,6 +6,7 @@ module Main where
 import StgLanguage
 import StgParser
 import StgPushEnterMachine
+import StgLLVMBackend
 import Stg
 -- import StgLLVMBackend
 
@@ -16,9 +17,29 @@ import Control.Monad.Trans.Class
 import Control.Lens
 import Control.Exception
 import Control.Monad
-
-
 import Data.List
+import Data.Monoid
+
+
+import Options.Applicative
+
+data CommandLineOptions = CommandLineOptions {
+  emitLLVM :: Bool,
+  filepath :: String
+}
+
+filepathOpt :: Parser (String)
+filepathOpt = strOption (long "file" <> short 'f' <> metavar "FILEPATH")
+
+emitLLVMOpt :: Parser Bool
+emitLLVMOpt = switch (long "emit-llvm")
+
+commandLineOptionsParser :: Parser CommandLineOptions
+commandLineOptionsParser = CommandLineOptions <$> emitLLVMOpt <*> filepathOpt
+
+commandLineOptionsParserInfo :: ParserInfo CommandLineOptions
+commandLineOptionsParserInfo = info commandLineOptionsParser infomod where
+    infomod = fullDesc <> progDesc "STG -> LLVM compiler" <> header "simplexhc"
 
 repl :: InputT IO ()
 repl = do 
@@ -50,22 +71,34 @@ getTraceString (trace, mErr) =
   traceStr = intercalate "\n\n==================================\n\n" (fmap show trace) 
   machineFinalStateLogStr = if length trace == 0 then "" else "\nlog:\n====\n" ++ show ((last trace) ^. currentLog)
 
-runFile :: String -> IO ()
-runFile fpath = do
+runFileInterp :: String -> IO ()
+runFileInterp fpath = do
     raw <- Prelude.readFile fpath
-    putStrLn "Interp:\n=======================================\n"
     let mInitState = tryCompileString raw
-    
     let trace = fmap genMachineTrace mInitState
     case trace of
           (Left compileErr) -> do  
                                       putStrLn "compile error: "
                                       putStrLn  $ compileErr
           (Right trace) -> putStr . getTraceString $ trace
-            
+
+runFileLLVM :: String -> IO ()
+runFileLLVM fpath = do
+    raw <- Prelude.readFile fpath
+    let mParse = parseString raw
+    case mParse of
+        (Left compileErr) -> do
+                              putStrLn "compile error: "
+                              putStrLn  $ compileErr
+        (Right program) -> do
+                             putStrLn "LLVM module: "
+                             str <- getIRString program
+                             putStr  str
 main :: IO ()
 main = do
-    args <- getArgs
-    if null args
+    opts <- execParser commandLineOptionsParserInfo
+    if filepath opts == ""
         then runInputT defaultSettings repl
-        else runFile (head args)
+        else if emitLLVM opts == False 
+        then runFileInterp (filepath opts)
+        else runFileLLVM (filepath opts)

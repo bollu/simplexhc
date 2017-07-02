@@ -6,7 +6,7 @@ import StgPushEnterMachine
 import Text.Trifecta as TR
 -- note that this is a trifecta dependency
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
--- import StgLLVMBackend
+import StgLLVMBackend
 --
 
 type ErrorString = String

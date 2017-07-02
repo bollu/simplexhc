@@ -1,9 +1,9 @@
-module StgLLVMBackend(IRString, getStgString) where
+module StgLLVMBackend(IRString, getIRString) where
 import StgLanguage
 import ColorUtils
 
 
-import qualified LLVM.AST as AST 
+import qualified LLVM.AST as AST
 import LLVM.AST (Named(..))
 import qualified LLVM.AST.Global as G
 import qualified LLVM.CodeModel as CodeModel
@@ -27,11 +27,9 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Short as B
          (ShortByteString, toShort, fromShort)
 import Data.Char (chr)
-import qualified LoweringFFI as L
 
 
--- implement serialisation routines for things like enum tags, etc.
-import StgMachine
+import qualified Data.Map.Strict as M
 
 
 import Control.Monad.Except
@@ -41,25 +39,26 @@ type IRString = String
 bsToStr :: B.ByteString -> String
 bsToStr = map (chr . fromEnum) . B.unpack
 
+-- | Convert a 'String' to a 'ShortByteString'
 strToShort :: String -> B.ShortByteString
 strToShort = B.toShort . C8.pack
 
+-- | Convert a 'String' to a 'AST.Name'
 strToName :: String -> AST.Name
 strToName = AST.Name . strToShort
 
-{-
-getStgString :: Program -> IO IRString
-getStgString _ = L.mkModule >>= L.getModuleString
--}
 
-getStgString :: Program -> IO IRString
-getStgString program = 
-  bsToStr <$> (withContext $ 
-    \context -> 
+-- | Construct the LLVM IR string corresponding to the program
+getIRString :: Program -> IO IRString
+getIRString program = 
+  bsToStr <$> (withContext $
+    \context ->
        (Module.withModuleFromAST context mod (Module.moduleLLVMAssembly)))
       where
-        mod = mkModule . mkSTGDefinitions $ program
+        mod = mkModule (mkSTGDefinitions program builder)
+        builder = mkBuilder program
 
+-- | Create a new module
 mkModule :: [AST.Definition] ->  AST.Module
 mkModule defs = AST.Module {
       AST.moduleName=B.toShort . C8.pack  $ "simplexhc",
@@ -82,30 +81,37 @@ mkModule defs = AST.Module {
 i32ty :: Type
 i32ty = IntegerType 32
 
-data Code = CodeEval | CodeEnter deriving(Show, Enum)
+type BindingId = Int
+-- | Builder that maintains context of what we're doing when constructing IR.
+data Builder = Builder {
+  bindings :: [Binding]
+} deriving(Show)
 
-stgGlobalCode :: AST.Definition
-stgGlobalCode = AST.GlobalDefinition (G.globalVariableDefaults {
-    G.name=strToName "gCode",
-    G.type'=i32ty,
-    G.isConstant=False
+mkBuilder :: Program -> Builder
+mkBuilder binds = Builder {
+  bindings = binds >>= collectBindingsInBinding
+}
+
+mkSwitchFunction :: Builder -> AST.Definition
+mkSwitchFunction bs = AST.GlobalDefinition (G.functionDefaults {
+  G.name = strToName "mainSwitch",
+  G.returnType = AST.VoidType,
+  G.parameters = ([], False),
+  G.basicBlocks = []
 })
 
 continuationType :: Type
 continuationType = undefined
 
-stgPrelude :: [AST.Definition]
-stgPrelude = [stgGlobalCode]
+-- | Create the main "switching" function.
+mkSTGDefinitions :: Program -> Builder -> [AST.Definition]
+mkSTGDefinitions p builder = [mkSwitchFunction builder]
 
-mkSTGDefinitions :: Program -> [AST.Definition]
-mkSTGDefinitions p = stgPrelude ++ []
+-- | Tag a value
+data ValueTag = ValueTagInt | ValueTagFloat deriving(Show, Enum, Bounded)
 
--- |Tag a value
-data ValueTag = ValueTagInt | ValueTagFloat deriving(Show)
-
--- |Convert a value tag to an integer
+-- | Convert a 'ValueTag' to 'Int' for LLVM codegen
 valueTagToInt :: ValueTag -> Int
-valueTagToInt (ValueTagInt) = 0
-valueTagToInt (ValueTagFloat) = 1
+valueTagToInt = fromEnum
 
 
