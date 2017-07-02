@@ -27,6 +27,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Short as B
          (ShortByteString, toShort, fromShort)
 import Data.Char (chr)
+import Text.PrettyPrint as PP
 
 
 import qualified Data.Map.Strict as M
@@ -50,7 +51,8 @@ strToName = AST.Name . strToShort
 
 -- | Construct the LLVM IR string corresponding to the program
 getIRString :: Program -> IO IRString
-getIRString program = 
+getIRString program = do
+  putStrLn . show $ builder
   bsToStr <$> (withContext $
     \context ->
        (Module.withModuleFromAST context mod (Module.moduleLLVMAssembly)))
@@ -85,7 +87,17 @@ type BindingId = Int
 -- | Builder that maintains context of what we're doing when constructing IR.
 data Builder = Builder {
   bindings :: [Binding]
-} deriving(Show)
+} 
+
+instance Prettyable Builder where
+  mkDoc (Builder binds) = 
+    vcat (zipWith prettyfn [1..] binds)
+      where
+        prettyfn :: Int -> Binding -> Doc
+        prettyfn = (\i b -> mkDoc i <+> text ":" <+> mkDoc b)
+
+instance Show Builder where
+  show = renderStyle showStyle . mkDoc
 
 mkBuilder :: Program -> Builder
 mkBuilder binds = Builder {

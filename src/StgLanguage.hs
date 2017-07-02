@@ -9,8 +9,6 @@ import Control.Lens
 import Text.PrettyPrint as PP
 import ColorUtils
 import qualified Data.List.NonEmpty as NE
-import qualified Text.Megaparsec as P
-import qualified Text.Megaparsec.Pos as P.Pos
 
 showStyle :: PP.Style
 showStyle = PP.Style {
@@ -82,13 +80,14 @@ type Program = [Binding]
 
 collectBindingsInExpr :: ExprNode -> [Binding]
 collectBindingsInExpr (ExprNodeBinop l _ r) = collectBindingsInExpr l ++ collectBindingsInExpr r
-collectBindingsInExpr (ExprNodeLet _ bindings expr) = bindings ++ collectBindingsInExpr expr
+collectBindingsInExpr (ExprNodeFnApplication _ _) = []
+collectBindingsInExpr (ExprNodeConstructor _) = []
+collectBindingsInExpr (ExprNodeLet _ bindings expr) = (bindings >>= collectBindingsInBinding) ++ collectBindingsInExpr expr
 collectBindingsInExpr (ExprNodeCase case' alts) = collectBindingsInExpr case' 
 collectBindingsInExpr (ExprNodeInt _ ) = []
-collectBindingsInExpr (ExprNodeFnApplication _ _) = []
 
 collectBindingsInBinding :: Binding -> [Binding]
-collectBindingsInBinding (Binding _ lambda) = collectBindingsInExpr . _lambdaExprNode $ lambda
+collectBindingsInBinding b@(Binding _ lambda) = b:(collectBindingsInExpr . _lambdaExprNode $ lambda)
 
 data Constructor = Constructor { _constructorName :: !ConstructorName,
                                  _constructorAtoms :: ![Atom]
