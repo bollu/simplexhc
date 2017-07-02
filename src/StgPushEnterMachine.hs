@@ -9,7 +9,7 @@ module StgPushEnterMachine where
 import StgLanguage
 
 
-import Text.PrettyPrint as PP
+import Data.Text.Prettyprint.Doc as PP
 import Numeric 
 import qualified Data.Map as M
 import Control.Monad.Trans.Class
@@ -39,12 +39,12 @@ data Continuation = Continuation { _continuationAlts :: ![CaseAltType],
                                    _continuationEnv :: !LocalEnvironment
                                 }
 
-instance Prettyable Continuation where
-  mkDoc Continuation{..} = text "alts:" $$ 
-                           (_continuationAlts  & map mkDoc & vcat)
+instance Pretty Continuation where
+  pretty Continuation{..} = vsep [pretty "alts:",
+                                 _continuationAlts  & map pretty & vcat]
 
 instance Show Continuation where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 
 data UpdateFrame = UpdateFrame {
@@ -55,31 +55,32 @@ data UpdateFrame = UpdateFrame {
                                  -- | The address of the heap closure to be updated.
                                  _updateFrameAddress :: Addr
                                }
-instance Prettyable UpdateFrame where
-  mkDoc UpdateFrame{..} = nest 4 (text "Argument Stack: " $$
-                          mkDoc _updateFrameArgumentStack $$
-                          text "Return Stack: " $$
-                          mkDoc _updateFrameReturnStack)
+instance Pretty UpdateFrame where
+  pretty UpdateFrame{..} = 
+    indent 4 (vsep [pretty "Argument Stack: "
+                  , pretty _updateFrameArgumentStack
+                  , pretty "Return Stack: "
+                  , pretty _updateFrameReturnStack])
 
 
 -- | Represents an STG Address
 newtype Addr = Addr { _getAddr :: Int } deriving(Eq, Ord)
-instance Prettyable Addr where
-    mkDoc addr = styleAddr PP.<> (text $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> styleReset
+instance Pretty Addr where
+    pretty addr = styleAddr PP.<> (pretty $ "0x" ++ (addr & _getAddr & (\x -> showHex x ""))) PP.<> styleReset
 
 instance Show Addr where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 data Value = ValueAddr Addr | ValuePrimInt Int
     deriving (Eq, Ord)
 
 
-instance Prettyable Value where
-  mkDoc (ValueAddr addr) = mkStyleTag (text "val:") PP.<> mkDoc addr
-  mkDoc (ValuePrimInt int) = mkStyleTag (text "val:") PP.<> text (show int) PP.<> text "#" 
+instance Pretty Value where
+  pretty (ValueAddr addr) = mkStyleTag (pretty "val:") PP.<> pretty addr
+  pretty (ValuePrimInt int) = mkStyleTag (pretty "val:") PP.<> pretty int PP.<> pretty "#" 
 
 instance Show Value where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 -- | Stack of 'Value'
 newtype Stack a = Stack { _unStack :: [a] } deriving(Functor, Monoid, Foldable, Traversable)
@@ -90,15 +91,20 @@ stackLength = length . _unStack
 stackEmpty :: Stack a
 stackEmpty = Stack []
 
-instance Prettyable a => Prettyable (Stack a) where
-  mkDoc (Stack []) = text "EMPTY"
-  mkDoc (Stack xs) = text ("count: " ++ show (length xs)) $+$
-                           mkStyleAnnotation (text "TOP") $+$
-                           ((zipWith (<+>) (fmap (\i -> mkStyleAnnotation (PP.text "|" PP.<> PP.int i PP.<> text ":")) [1..] ) (fmap mkDoc xs)) & sep) $+$
-                           mkStyleAnnotation (text "BOTTOM")
+instance Pretty a => Pretty (Stack a) where
+  pretty (Stack []) = pretty "EMPTY"
+  pretty (Stack xs) = 
+    vsep 
+      [pretty "count: "  <+> pretty  (length xs),
+      mkStyleAnnotation (pretty "TOP"), 
+      zipWith (<+>) (fmap  intlabel [1..]) (fmap pretty xs) & vsep,
+      mkStyleAnnotation (pretty "BOTTOM")]
+    where
+      intlabel :: Int -> Doc ann
+      intlabel i = mkStyleAnnotation (pretty "|" <+> pretty i <+> colon)
 
-instance Prettyable a => Show (Stack a) where
-  show = renderStyle showStyle . mkDoc
+instance Pretty a => Show (Stack a) where
+  show = prettyToString
 
 type ArgumentStack = Stack Value
 type ReturnStack = Stack Continuation
@@ -111,28 +117,29 @@ type GlobalEnvironment = M.Map VarName Addr
 
 -- | has bindings of free variables with a 'LambdaForm'
 newtype ClosureFreeVals = ClosureFreeVals { _getFreeVals :: [Value] } deriving(Show)
-instance Prettyable ClosureFreeVals where
-  mkDoc freeVars = _getFreeVals freeVars & map mkDoc & punctuate (text ",") & hsep
+instance Pretty ClosureFreeVals where
+  pretty freeVars = _getFreeVals freeVars & map pretty & punctuate comma  & hsep
 data Closure = Closure { 
     _closureLambda :: !Lambda,
     _closureFreeVals :: !ClosureFreeVals
 } deriving (Show)
 
-instance Prettyable Closure where
+instance Pretty Closure where
   -- TODO: allow closure to invoke a custom renderer for free variables in the lambdaForm
-  mkDoc (Closure{..}) = (mkStyleTag (text "cls:")) <+> text "["
-                         <+> mkDoc _closureLambda PP.<> envdoc <+> text "]" where
+  pretty (Closure{..}) = (mkStyleTag (pretty "cls:")) <+> pretty "["
+                         <+> pretty _closureLambda PP.<> envdoc <+> pretty "]" where
             envdoc = if length ( _getFreeVals ( _closureFreeVals)) == 0
-                    then text ""
-                    else text " | Free variable vals: " <+> mkDoc  _closureFreeVals 
+                    then pretty ""
+                    else pretty " | Free variable vals: " <+> pretty  _closureFreeVals 
                         
 
 
 type LocalEnvironment = M.Map VarName Value
 
-instance (Prettyable k, Prettyable v) => Prettyable (M.Map k v) where
-  mkDoc m = (fmap (uncurry mkKvDoc) (M.toList m))  & punctuate (text ";") & vcat where
-              mkKvDoc key val = mkDoc key <+> text "->" <+> mkDoc val
+instance (Pretty k, Pretty v) => Pretty (M.Map k v) where
+  pretty m = 
+    fmap (uncurry mkKvDoc) (M.toList m)  & punctuate semi & vsep where
+        mkKvDoc key val = pretty key <+> pretty "->" <+> pretty val
 
 data Code = CodeEval ExprNode LocalEnvironment | 
             CodeEnter Addr |
@@ -140,23 +147,20 @@ data Code = CodeEval ExprNode LocalEnvironment |
             CodeReturnConstructor Constructor [Value] |
             CodeReturnInt StgInt deriving(Show)
 
-instance Prettyable Code where
-  mkDoc (CodeEval expr env) = text "Eval" <+> braces (mkDoc expr) <+> text "|Local:" <+> braces(mkDoc env)
-  mkDoc (CodeEnter addr) = text "Enter" <+> mkDoc addr
-  mkDoc (CodeReturnConstructor cons values) = 
-    text "ReturnConstructor" <+>  
-      (mkDoc (cons ^. constructorName) <+> 
-     (values & map mkDoc & punctuate comma & hsep & braces) & parens)
-  mkDoc (CodeReturnInt i) = text "ReturnInt" <+> text (show i)
+instance Pretty Code where
+  pretty (CodeEval expr env) = pretty "Eval" <+> braces (pretty expr) <+> pretty "|Local:" <+> braces(pretty env)
+  pretty (CodeEnter addr) = pretty "Enter" <+> pretty addr
+  pretty (CodeReturnConstructor cons values) = 
+    pretty "ReturnConstructor" <+>  
+      (pretty (cons ^. constructorName) <+> 
+     (values & map pretty & punctuate comma & hsep & braces) & parens)
+  pretty (CodeReturnInt i) = pretty "ReturnInt" <+> pretty i
 
 
-newtype Log = Log { unLog :: [Doc] } deriving(Monoid)
-
-instance Prettyable Log where
-    mkDoc (Log ls) = fmap (\l -> text (">>") <+> l) ls & vcat
+newtype Log = Log { unLog :: [Doc ()] } deriving(Monoid)
 
 instance Show Log where
-    show = renderStyle showStyle . mkDoc
+  show l = unLog l & vsep & docToString
 
 data PushEnterMachineState = PushEnterMachineState {
     _argumentStack :: !ArgumentStack,
@@ -170,26 +174,26 @@ data PushEnterMachineState = PushEnterMachineState {
 }
 
 
-instance Prettyable PushEnterMachineState where
-  mkDoc PushEnterMachineState{..} = 
-   heading (text "@@@ Steps to reach state:") $$ currentLogDoc $+$
-   heading (text "@@@ Code:") $$ code $+$
-   heading (text "@@@ Args:") $$ argsDoc $+$
-   heading (text "@@@ Return:") $$ returnDoc $+$
-   heading (text "@@@ Update:") $$ updateDoc $+$
-   heading (text "@@@ Heap:") $$ heapDoc $+$
-   heading (text "@@@ Env:") $$ globalEnvDoc $+$
-   heading (text "---") where
-    argsDoc = _argumentStack & mkDoc
-    returnDoc = _returnStack & mkDoc
-    updateDoc = _updateStack & mkDoc
-    heapDoc = _heap & mkDoc
-    globalEnvDoc = _globalEnvironment & mkDoc 
-    code = _code & mkDoc
-    currentLogDoc = _currentLog & mkDoc
+instance Pretty PushEnterMachineState where
+  pretty PushEnterMachineState{..} = 
+    vsep [
+     heading (pretty "@@@ Code:"), code, line,
+     heading (pretty "@@@ Args:"), argsDoc, line,
+     heading (pretty "@@@ Return:"), returnDoc, line,
+     heading (pretty "@@@ Update:"), updateDoc, line,
+     heading (pretty "@@@ Heap:"), heapDoc, line,
+     heading (pretty "@@@ Env:"), globalEnvDoc, line,
+     heading (pretty "---")] where
+        argsDoc = _argumentStack & pretty
+        returnDoc = _returnStack & pretty
+        updateDoc = _updateStack & pretty
+        heapDoc = _heap & pretty
+        globalEnvDoc = _globalEnvironment & pretty 
+        code = _code & pretty
+        currentLogDoc = _currentLog & unLog & vsep
 
 instance Show PushEnterMachineState where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 data MachineProgress = MachineStepped | MachineHalted deriving(Show, Eq)
 
@@ -356,12 +360,12 @@ lookupAddrInHeap addr = do
 -- pop n values off the argument stack
 takeNArgs :: Int -> MachineT [Value]
 takeNArgs n = do
-    appendLog $ text "popping" <+> text (show n) <+> text "off of the argument stack"
+    appendLog $ pretty "popping" <+> pretty n <+> pretty "off of the argument stack"
 
     argStackList <- use (argumentStack . unStack)
     if length argStackList < n
         then do
-            appendLog $ text "length of argument stack:" <+> text (show (length argStackList)) <+> text "< n:" <+> text (show n)
+            appendLog $ pretty "length of argument stack:" <+> pretty (length argStackList) <+> pretty "< n:" <+> pretty n
             throwError $ StgErrorNotEnoughArgsOnStack n (Stack argStackList)
         else do
             let args = take n argStackList
@@ -376,7 +380,7 @@ stepMachine = do
     nowOldLog <- use currentLog
     oldLog <>= nowOldLog
     currentLog .= mempty
-    appendLog $ text "evaluating code:" <+> mkDoc code
+    appendLog $ pretty "evaluating code:" <+> pretty code
 
     case code of
         CodeEval f local -> stepCodeEval local f
@@ -387,7 +391,7 @@ stepMachine = do
 
 setCode :: Code -> MachineT ()
 setCode c = do
-    appendLog $ text "setting code to: " <+> mkDoc c
+    appendLog $ pretty "setting code to: " <+> pretty c
     code .= c
 
 updateStackPop :: MachineT UpdateFrame
@@ -397,12 +401,12 @@ updateStackPop = stackPop updateStack StgErrorUpdateStackEmpty
 -- TODO: find out how to make this look nicer
 heapUpdateAddress :: Addr -> Closure -> MachineT ()
 heapUpdateAddress addr cls = do
-    appendLog $ text "updating heap at address:" <+> mkDoc addr <+> text "with closure:" $$
-              nest 4 (text "new closure:" <+> mkDoc cls)
+    appendLog $ vsep [pretty "updating heap at address:" <+> pretty addr <+> pretty "with closure:",
+                      indent 4 (pretty "new closure:" <+> pretty cls)]
     h <- use heap
     case h ^. at addr of
         Nothing -> do
-                appendError $ text "heap does not contain address:" <+> mkDoc addr
+                appendError $ pretty "heap does not contain address:" <+> pretty addr
                 throwError $ StgErrorHeapUpdateHasNoPreviousValue addr
         Just oldcls -> do
                 let h' = at addr .~ Just cls $ h
@@ -427,7 +431,7 @@ _mkConstructorClosure c consVals = Closure {
 
 stepCodeUpdatableReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeUpdatableReturnConstructor cons values = do
-    appendLog $ text "using updatable return constructor."
+    appendLog $ pretty "using updatable return constructor."
     frame <- updateStackPop
 
     let as = frame ^. updateFrameArgumentStack
@@ -445,7 +449,7 @@ stepCodeUpdatableReturnConstructor cons values = do
 
 stepCodeNonUpdatableReturnConstructor :: Constructor -> [Value] -> MachineT MachineProgress
 stepCodeNonUpdatableReturnConstructor cons values = do
-    appendLog $ text "using non-updatable return constructor."
+    appendLog $ pretty "using non-updatable return constructor."
     returnStackEmpty <- use $ returnStack . to null
     if returnStackEmpty then
         return MachineHalted
@@ -484,16 +488,16 @@ stepCodeReturnConstructor cons values = do
 
 
 
-appendError :: Doc -> MachineT ()
+appendError :: Doc () -> MachineT ()
 appendError = appendLog . mkStyleError
 
-appendLog :: Doc -> MachineT ()
+appendLog :: Doc () -> MachineT ()
 appendLog s = currentLog <>= Log [s]
 
 -- | 'CodeEval' execution
 stepCodeEval :: LocalEnvironment -> ExprNode -> MachineT MachineProgress
 stepCodeEval local expr = do
-    appendLog $ text "stepCodeEval called"
+    appendLog $ pretty "stepCodeEval called"
     case expr of
         ExprNodeFnApplication f xs -> stepCodeEvalFnApplication local f xs  
         ExprNodeLet isReucursive bindings inExpr -> stepCodeEvalLet local  isReucursive bindings inExpr
@@ -590,7 +594,7 @@ stepCodeEnter addr =
 -- | Closure is the closure
 stepCodeEnterIntoUpdatableClosure :: Addr -> Closure -> MachineT MachineProgress
 stepCodeEnterIntoUpdatableClosure addr closure = do
-    appendLog $ mkDoc closure <+> text "is updatable."
+    appendLog $ pretty closure <+> pretty "is updatable."
     let l = closure ^. closureLambda
     let boundVars = l ^. lambdaBoundVarIdentifiers
     let freeVarIds = l ^. lambdaFreeVarIdentifiers
@@ -598,7 +602,7 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
 
     -- is there a better way to format this?
     if (length boundVars /= 0) then do
-        appendLog $ text "updatable closure has bound variables:" <+> mkDoc boundVars
+        appendLog $ pretty "updatable closure has bound variables:" <+> pretty boundVars
         error "updatable closure has bound variables"
     else do
         let localFreeVars = M.fromList (zip freeVarIds
@@ -609,7 +613,7 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
         as <- use argumentStack
         rs <- use returnStack
         stackPushN updateStack [(UpdateFrame as rs addr)]
-        appendLog $ text "pushed update frame"
+        appendLog $ pretty "pushed update frame"
 
         -- empty argument and return stack so that them being deref'd will trigger an update
         argumentStack .= stackEmpty
@@ -643,18 +647,18 @@ stepCodeEnterIntoUpdatableClosure addr closure = do
 --      a free variable.
 mkEnterUpdateNewClosure :: Closure -> Closure ->  [Value] -> MachineT Closure
 mkEnterUpdateNewClosure toUpdate cur as = do
-  appendLog $ text "updating old closure:" <+> mkDoc toUpdate $$
-              text "with information from closure:" <+> mkDoc cur
+  appendLog $ vsep [ pretty "updating old closure:" <+> pretty toUpdate 
+                     ,pretty "with information from closure:" <+> pretty cur]
   let nStackArgs = length as
   let curFreeIds = cur ^. closureLambda ^. lambdaFreeVarIdentifiers
   -- xs1 ++ xs2 = xs
   let curBoundIds = cur ^. closureLambda . lambdaBoundVarIdentifiers
   let (boundToFree, stillBound) = (take nStackArgs curBoundIds, drop nStackArgs curBoundIds)
 
-  appendLog $ text "current all bound variables:" $$ nest 4 ((fmap mkDoc curBoundIds) & sep)
-  appendLog $ text "new bound variables to free:" $$ nest 4 ((fmap mkDoc boundToFree) & sep)
-  appendLog $ text "new free variable values: " $$ nest 4 ((fmap mkDoc as) & sep)
-  appendLog $ text "new bound variables still bound:" $$ nest 4 ((fmap mkDoc stillBound) & sep)
+  appendLog $  vsep [pretty "current all bound variables:", nest 4 ((fmap pretty curBoundIds) & sep)]
+  appendLog $  vsep [pretty "new bound variables to free:", nest 4 ((fmap pretty boundToFree) & sep)]
+  appendLog $  vsep [pretty "new free variable values: ", nest 4 ((fmap pretty as) & sep)]
+  appendLog $  vsep [pretty "new bound variables still bound:", nest 4 ((fmap pretty stillBound) & sep)]
   
   return $ cur {
     _closureFreeVals = ClosureFreeVals (cur ^. closureFreeVals . getFreeVals ++ as),
@@ -667,7 +671,7 @@ mkEnterUpdateNewClosure toUpdate cur as = do
 -- provide the lambda and the list of free variables for binding
 stepCodeEnterIntoNonupdatableClosure :: Addr -> Closure -> MachineT MachineProgress
 stepCodeEnterIntoNonupdatableClosure addr closure = do
-    appendLog $ mkDoc closure <+> text "is not updatable."
+    appendLog $ pretty closure <+> pretty "is not updatable."
     let l = closure ^. closureLambda
     let boundVars = l ^. lambdaBoundVarIdentifiers
     let freeVars = l ^. lambdaFreeVarIdentifiers
@@ -681,17 +685,17 @@ stepCodeEnterIntoNonupdatableClosure addr closure = do
     if argStackLength < length boundVars
     -- we need to pop the update stack
     then do
-        appendLog $ text "insufficient number of arguments on argument stack." $$ (
-          nest 4 (text "needed:" <+> PP.int (length boundVars) <+> text "bound values") $$ 
-            nest 4 (text "had:" <+> PP.int argStackLength <+> text "on argument stack.") $$
-          nest 4 (mkDoc argStack))
-        appendLog $ text "looking for update frame to satisfy arguments..."
+        appendLog $ vsep [pretty "insufficient number of arguments on argument stack.",
+                          nest 4 (vsep [pretty "needed:" <+> pretty (length boundVars) <+> pretty "bound values",
+                                        pretty "had:" <+> pretty argStackLength <+> pretty "on argument stack.",
+                                        pretty argStack])]
+        appendLog $ pretty "looking for update frame to satisfy arguments..."
         uf@UpdateFrame {
               _updateFrameAddress=addru,
               _updateFrameArgumentStack=argStacku,
               _updateFrameReturnStack=rsu
         } <- updateStackPop
-        appendLog $ text "found update frame: " $$ mkDoc uf
+        appendLog $ vsep [pretty "found update frame: ",  pretty uf]
 
         let argStackList =  argStack ^. unStack
 

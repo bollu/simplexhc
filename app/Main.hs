@@ -21,6 +21,9 @@ import Data.List
 import Data.Monoid
 
 
+import IR
+import IRBuilder
+
 import Options.Applicative
 
 data CommandLineOptions = CommandLineOptions {

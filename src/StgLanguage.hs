@@ -6,31 +6,11 @@ module StgLanguage where
 
 import Control.Monad.Trans.Class
 import Control.Lens
-import Text.PrettyPrint as PP
+-- import Text.PrettyPrint as PP
 import ColorUtils
 import qualified Data.List.NonEmpty as NE
+import Data.Text.Prettyprint.Doc as PP
 
-showStyle :: PP.Style
-showStyle = PP.Style {
-    mode = PP.PageMode,
-    lineLength = 30,
-    ribbonsPerLine = 1.5
-}
-
-mkNest :: Doc -> Doc
-mkNest = nest 4
-
-class Prettyable a where
-    mkDoc :: a -> Doc
-
-instance Prettyable Int where
-  mkDoc = int
-
-instance Prettyable a => Prettyable [a] where
-  mkDoc xs = xs & fmap mkDoc & punctuate comma & hsep & parens
-
-instance (Prettyable a, Prettyable b) => Prettyable (a, b) where
-  mkDoc (a, b) = braces (mkDoc a PP.<> comma PP.<> mkDoc b)
 
 newtype ConstructorName = ConstructorName { _getConstructorName :: String } deriving (Eq, Ord)
 makeLenses ''ConstructorName
@@ -38,37 +18,37 @@ makeLenses ''ConstructorName
 instance Show ConstructorName where
   show cons = _getConstructorName cons
 
-instance Prettyable ConstructorName where
-    mkDoc = text . show
+instance Pretty ConstructorName where
+    pretty = pretty . show
 
 newtype VarName = VarName { _getVariable :: String } deriving(Ord, Eq)
 
-instance Prettyable VarName where
-    mkDoc var = mkStyleTag (text "var:") <> (text (_getVariable var))
+instance Pretty VarName where
+    pretty var = mkStyleTag (pretty "var:") <+> (pretty (_getVariable var))
 
 instance Show VarName where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 newtype RawNumber = RawNumber { _getRawNumber :: String }  deriving(Eq, Ord)
 makeLenses ''RawNumber
 
 
-instance Prettyable RawNumber where
-  mkDoc (RawNumber num) = mkStyleTag (text "rawnum:") PP.<> text num PP.<> text "#"
+instance Pretty RawNumber where
+  pretty (RawNumber num) = mkStyleTag (pretty "rawnum:") PP.<> pretty num PP.<> pretty "#"
 
 instance Show RawNumber where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 newtype StgInt = StgInt { unStgInt :: Int } deriving(Show, Eq)
 
-instance Prettyable StgInt where
-  mkDoc (StgInt i) = text . show $ i
+instance Pretty StgInt where
+  pretty (StgInt i) = pretty . show $ i
 
 data Atom = AtomInt !StgInt | AtomVarName !VarName deriving(Show)
 
-instance Prettyable Atom where
-    mkDoc (AtomInt n) = mkDoc n
-    mkDoc (AtomVarName var) = mkDoc var
+instance Pretty Atom where
+    pretty (AtomInt n) = pretty n
+    pretty (AtomVarName var) = pretty var
 
 data Binding = Binding {
   _bindingName :: !VarName,
@@ -93,11 +73,12 @@ data Constructor = Constructor { _constructorName :: !ConstructorName,
                                  _constructorAtoms :: ![Atom]
                                }
 
-instance Prettyable Constructor where
-  mkDoc (Constructor name idents) = mkDoc name <+> (idents & map mkDoc & hsep)
+instance Pretty Constructor where
+  pretty (Constructor name idents) = pretty name <+> (idents & map pretty & hsep)
 
 instance Show Constructor where
-  show = renderStyle showStyle . mkDoc
+    show = prettyToString
+
 
 data IsLetRecursive = LetRecursive | LetNonRecursive deriving(Show, Eq)
 
@@ -109,8 +90,8 @@ instance Show BinaryOperator where
   show Multiply = "*"
   show Divide = "/"
 
-instance Prettyable BinaryOperator where
-    mkDoc = text . show
+instance Pretty BinaryOperator where
+    pretty = pretty . show
 
 data ExprNode = ExprNodeBinop !ExprNode !BinaryOperator !ExprNode |
                ExprNodeFnApplication !VarName ![Atom] |
@@ -127,19 +108,19 @@ data CaseAlt lhs = CaseAlt {
 }
 
 
-instance Prettyable lhs => Prettyable (CaseAlt lhs) where
-  mkDoc CaseAlt{..} = mkDoc _caseAltLHS <+>
-                      text "->" <+>
-                      mkDoc _caseAltRHS
+instance Pretty lhs => Pretty (CaseAlt lhs) where
+  pretty CaseAlt{..} = pretty _caseAltLHS <+>
+                      pretty "->" <+>
+                      pretty _caseAltRHS
 
-instance Prettyable lhs => Show (CaseAlt lhs) where
-    show = renderStyle showStyle . mkDoc
+instance Pretty lhs => Show (CaseAlt lhs) where
+    show = prettyToString
 
 data ConstructorPatternMatch = ConstructorPatternMatch ConstructorName [VarName] deriving(Eq)
 
-instance Prettyable ConstructorPatternMatch where
-  mkDoc (ConstructorPatternMatch consName vars) = 
-      mkDoc consName <+> (fmap mkDoc vars & punctuate comma & hsep & braces)
+instance Pretty ConstructorPatternMatch where
+  pretty (ConstructorPatternMatch consName vars) = 
+      pretty consName <+> (fmap pretty vars & punctuate comma & hsep & braces)
 
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
                       CaseAltConstructor !(CaseAlt ConstructorPatternMatch) |
@@ -150,17 +131,17 @@ data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
 
 
 
-instance Prettyable CaseAltType where
-  mkDoc (CaseAltConstructor a) = 
-    mkDoc (_caseAltLHS a) <+>
-    text "->"  <+>
-    mkDoc (_caseAltRHS a) 
+instance Pretty CaseAltType where
+  pretty (CaseAltConstructor a) = 
+    pretty (_caseAltLHS a) <+>
+    pretty "->"  <+>
+    pretty (_caseAltRHS a) 
 
-  mkDoc (CaseAltInt a) = mkDoc a
-  mkDoc (CaseAltVariable a) = mkDoc a
+  pretty (CaseAltInt a) = pretty a
+  pretty (CaseAltVariable a) = pretty a
 
 instance Show CaseAltType where
-  show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 data Lambda = Lambda {
     _lambdaShouldUpdate :: !Bool,
@@ -171,17 +152,17 @@ data Lambda = Lambda {
 
 
 
-instance Prettyable Lambda where
-    mkDoc (Lambda{..}) = 
+instance Pretty Lambda where
+    pretty (Lambda{..}) = 
         freedoc <+> updatedoc <+>
-        bounddoc <+> text "->" <+>
-        (mkDoc _lambdaExprNode) where
-            freedoc = (map mkDoc _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
-            bounddoc = (map mkDoc _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
-            updatedoc = PP.char '\\' <> (if _lambdaShouldUpdate then PP.char 'u' else PP.char 'n')
+        bounddoc <+> pretty "->" <+>
+        (pretty _lambdaExprNode) where
+            freedoc = (map pretty _lambdaFreeVarIdentifiers) & punctuate comma & hsep & braces
+            bounddoc = (map pretty _lambdaBoundVarIdentifiers) & punctuate comma & hsep & braces
+            updatedoc = pretty '\\' <> (if _lambdaShouldUpdate then pretty 'u' else pretty 'n')
 
 instance Show Lambda where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 
 makeLenses ''Binding
@@ -194,38 +175,38 @@ makeLenses ''VarName
 makeLenses ''Constructor
 
 
-instance Prettyable ExprNode where
-    mkDoc  (ExprNodeFnApplication fnName atoms) =
-        (mkDoc fnName) <+>
-        (map mkDoc atoms & punctuate comma & hsep & braces)
+instance Pretty ExprNode where
+    pretty  (ExprNodeFnApplication fnName atoms) =
+        (pretty fnName) <+>
+        (map pretty atoms & punctuate comma & hsep & braces)
 
-    mkDoc (ExprNodeBinop eleft tok eright) = (mkDoc tok)  <+>
-                                             (mkDoc eleft) <+>
-                                             (mkDoc eright)
-    mkDoc (ExprNodeLet isrecursive bindings expr) = 
+    pretty (ExprNodeBinop eleft tok eright) = (pretty tok)  <+>
+                                             (pretty eleft) <+>
+                                             (pretty eright)
+    pretty (ExprNodeLet isrecursive bindings expr) = 
           letname <+>
-          bindingsstr $$ 
-          (text "in")  $$
-          (expr & mkDoc) where
-                        letname = PP.text (if isrecursive == LetNonRecursive then "let" else "letrec")
-                        bindingsstr = map mkDoc bindings & vcat
+          vcat [bindingsstr,
+                (pretty "in"),
+                (expr & pretty)] where
+                        letname = pretty (if isrecursive == LetNonRecursive then "let" else "letrec")
+                        bindingsstr = map pretty bindings & vcat
 
 
-    mkDoc (ExprNodeConstructor constructor) = mkDoc constructor
+    pretty (ExprNodeConstructor constructor) = pretty constructor
 
-    mkDoc (ExprNodeInt n) = mkDoc n
-    mkDoc (ExprNodeCase e alts) = text "case" <+> mkDoc e <+> text "of" <+> text "{" <+> (mkNest altsDoc)  <+> text "}" where
-                                              altsDoc = fmap mkDoc alts & vcat
+    pretty (ExprNodeInt n) = pretty n
+    pretty (ExprNodeCase e alts) = pretty "case" <+> pretty e <+> pretty "of" <+> pretty "{" <+> (mkNest altsDoc)  <+> pretty "}" where
+                                              altsDoc = fmap pretty alts & vcat
 
 instance Show ExprNode where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString
 
 
-instance Prettyable Binding where
-    mkDoc (Binding{..}) = 
-                         (mkDoc _bindingName) <+> equals <+>
-                         (_bindingLambda & mkDoc)
+instance Pretty Binding where
+    pretty (Binding{..}) = 
+                         (pretty _bindingName) <+> equals <+>
+                         (_bindingLambda & pretty)
 
 
 instance Show Binding where
-    show = renderStyle showStyle . mkDoc
+    show = prettyToString

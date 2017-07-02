@@ -2,6 +2,7 @@ module StgLLVMBackend(IRString, getIRString) where
 import StgLanguage
 import ColorUtils
 
+import Control.Lens
 
 import qualified LLVM.AST as AST
 import LLVM.AST (Named(..))
@@ -27,7 +28,8 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Short as B
          (ShortByteString, toShort, fromShort)
 import Data.Char (chr)
-import Text.PrettyPrint as PP
+import Data.Text.Prettyprint.Doc as PP
+import ColorUtils
 
 
 import qualified Data.Map.Strict as M
@@ -80,8 +82,14 @@ mkModule defs = AST.Module {
 -- eval
 -- enter
 
-i32ty :: Type
-i32ty = IntegerType 32
+i32val :: Int -> Constant
+i32val val = Int 32 (fromIntegral val)
+
+i32ty :: AST.Type
+i32ty = AST.IntegerType 32
+
+tagty :: Type
+tagty = i32ty
 
 type BindingId = Int
 -- | Builder that maintains context of what we're doing when constructing IR.
@@ -89,15 +97,15 @@ data Builder = Builder {
   bindings :: [Binding]
 } 
 
-instance Prettyable Builder where
-  mkDoc (Builder binds) = 
+instance Pretty Builder where
+  pretty (Builder binds) = 
     vcat (zipWith prettyfn [1..] binds)
       where
-        prettyfn :: Int -> Binding -> Doc
-        prettyfn = (\i b -> mkDoc i <+> text ":" <+> mkDoc b)
+        prettyfn :: Int -> Binding -> Doc a
+        prettyfn = (\i b -> pretty i <+> pretty ":" <+> pretty b)
 
 instance Show Builder where
-  show = renderStyle showStyle . mkDoc
+  show = prettyToString
 
 mkBuilder :: Program -> Builder
 mkBuilder binds = Builder {
@@ -105,12 +113,27 @@ mkBuilder binds = Builder {
 }
 
 mkSwitchFunction :: Builder -> AST.Definition
-mkSwitchFunction bs = AST.GlobalDefinition (G.functionDefaults {
+mkSwitchFunction (Builder binds) = AST.GlobalDefinition (G.functionDefaults {
   G.name = strToName "mainSwitch",
   G.returnType = AST.VoidType,
-  G.parameters = ([], False),
-  G.basicBlocks = []
+  G.parameters = ([G.Parameter tagty (strToName "tag") []] , False),
+  G.basicBlocks = [entrybb]
 })
+  where
+    trapDest = strToName "trap"
+
+    entrybb :: AST.BasicBlock
+    entrybb = G.BasicBlock (strToName "entry")
+                         []
+                         (Do $ AST.Switch {
+                            AST.operand0' = (AST.LocalReference tagty (strToName "tag")),
+                            AST.defaultDest = trapDest,
+                            AST.dests = dests,
+                            AST.metadata'=[]
+                         })
+
+    dests :: [(Constant, AST.Name)]
+    dests = map (\(i, bind) -> (i32val i, bind ^. bindingName ^. getVariable & strToName)) (zip [1..] binds)
 
 continuationType :: Type
 continuationType = undefined
@@ -125,5 +148,4 @@ data ValueTag = ValueTagInt | ValueTagFloat deriving(Show, Enum, Bounded)
 -- | Convert a 'ValueTag' to 'Int' for LLVM codegen
 valueTagToInt :: ValueTag -> Int
 valueTagToInt = fromEnum
-
 

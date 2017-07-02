@@ -33,7 +33,7 @@ library
                        bytestring,
                        mtl,
                        -- for my own use.
-                       pretty,
+                       prettyprinter,
                        -- for trifecta
                        ansi-wl-pprint,
                        hoist-error,
@@ -42,7 +42,8 @@ library
                        trifecta,
                        unordered-containers,
                        llvm-hs >= 4.1.0,
-                       llvm-hs-pure >= 4.1.0
+                       llvm-hs-pure >= 4.1.0,
+                       text
 
   extra-lib-dirs:      /usr/local/lib
   -- extra-libraries:     lowering
