@@ -20,7 +20,9 @@ library
                        StgPushEnterMachine,
                        Stg,
                        ColorUtils,
-                       StgLLVMBackend
+                       StgLLVMBackend,
+                       IR,
+                       IRBuilder
                        -- LoweringFFI
 
   build-depends:       base >= 4.7 && <= 5,
