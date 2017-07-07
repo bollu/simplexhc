@@ -47,7 +47,7 @@ data FunctionBuilder = FunctionBuilder {
   -- | Map between parameters and their corresponding value
   paramLabelToParam :: M.Map (Label Param) Value,
   -- | Unique label of the function
-  functionLabel :: FunctionLabel
+  functionBuilderFunctionLabel :: FunctionLabel
 }
 
 
@@ -75,7 +75,7 @@ _createFunctionBuilder paramsty retty label =
         tmpInstNamesCounter=0,
         paramLabelToParam=M.fromList $ map (\pname -> (pname, ValueParamRef pname)) pnames,
         type'=(paramsty, retty),
-        functionLabel=label
+        functionBuilderFunctionLabel=label
 
     }) where
       -- | initial list of parameter names
@@ -198,8 +198,10 @@ _createFunctionFromBuilder  FunctionBuilder{..} =
     functionBBMap=bbLabelToBB,
     functionEntryBBLabel=entryBBLabel,
     functionBBOrderingMap=bbLabelToOrder,
-    functionType=type'
-           }
+    functionType=type',
+    functionLabel=functionBuilderFunctionLabel,
+    functionParamLabels=map _getParamName [0..(length paramLabelToParam)]
+  }
 
 -- | Get the i'th parameter in the function. 0-indexed
 getParamValue :: Int -> State FunctionBuilder Value

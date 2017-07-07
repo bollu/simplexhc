@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs, ViewPatterns #-}
+{-# LANGUAGE GADTs, RecordWildCards #-}
 module IR where
 import Data.Text.Prettyprint.Doc as PP
 import qualified Data.List.NonEmpty as NE
@@ -92,7 +92,7 @@ data RetInst =
     switchValue :: Value,
     switchDefaultBB :: BBLabel,
     switchBBs :: [(Value, BBLabel)]
-  } | 
+  } |
   RetInstTerminal
 
 instance Pretty RetInst where
@@ -109,7 +109,6 @@ instance Pretty RetInst where
 -- | Used to order basic blocks
 type BBOrder = Int
 
-
 -- | A function is a list of basic blocks and parameters, and return type
 data Function = Function {
   -- A map from the basic block ID to a basic block.
@@ -119,7 +118,11 @@ data Function = Function {
   -- The map from a BB to the order.
   functionBBOrderingMap :: M.Map BBLabel BBOrder,
   -- The type of the function ([parameter types], return type)
-  functionType :: ([IRType], IRType)
+  functionType :: ([IRType], IRType),
+  -- The parameters names of the function
+  functionParamLabels :: [Label Param],
+  -- The label of the function
+  functionLabel :: FunctionLabel
 }
 
 -- | Label for a function
@@ -137,7 +140,16 @@ getBBFunctionsInOrder Function { functionBBOrderingMap=bbToOrdering,
       unsortedKeys = (M.keys bbIdToBBMap)
 
 instance Pretty Function where
-  pretty func = vcat . map pretty . getBBFunctionsInOrder $ func
+  pretty (func@Function{functionType=(paramTypes, returnType),..}) =
+    vcat [funcheader, indent 4 prettyBBS] where
+      funcheader :: Doc a
+      funcheader = pretty "fn" <+> pretty functionLabel <+> braces (params) <+> pretty "->" <+> pretty returnType
+      formatParam :: IRType -> Label Param -> Doc a
+      formatParam ty lbl = pretty lbl <+> colon <+> pretty ty
+      params :: Doc a
+      params = hsep (punctuate comma (zipWith formatParam paramTypes functionParamLabels))
+      prettyBBS :: Doc a
+      prettyBBS = vcat . map pretty . getBBFunctionsInOrder $ func
 
 
 -- A module consists of stuff that is global
