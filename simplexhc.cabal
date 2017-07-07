@@ -20,7 +20,8 @@ library
                        StgPushEnterMachine,
                        Stg,
                        ColorUtils,
-                       StgLLVMBackend,
+                       StgToIR,
+                       IRToLLVM,
                        IR,
                        IRBuilder
                        -- LoweringFFI

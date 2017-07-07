@@ -1,6 +1,4 @@
-module StgLLVMBackend(IRString, getIRString) where
-import StgLanguage
-import ColorUtils
+module IRToLLVM where
 
 import Control.Lens
 
@@ -33,11 +31,8 @@ import ColorUtils
 
 
 import qualified Data.Map.Strict as M
-
-
-import Control.Monad.Except
-
-type IRString = String
+import IRBuilder
+import IR as IR
 
 bsToStr :: B.ByteString -> String
 bsToStr = map (chr . fromEnum) . B.unpack
@@ -51,9 +46,13 @@ strToName :: String -> AST.Name
 strToName = AST.Name . strToShort
 
 
+moduleToLLVMIRString :: IR.Module -> IO IRString
+moduleToLLVMIRString mod = error "unimplemented" 
+
 -- | Construct the LLVM IR string corresponding to the program
-getIRString :: Program -> IO IRString
-getIRString program = do
+{-
+moduleIRString :: Program -> IO IRString
+moduleIRString program = do
   putStrLn . show $ builder
   bsToStr <$> (withContext $
     \context ->
@@ -61,6 +60,7 @@ getIRString program = do
       where
         mod = mkModule (mkSTGDefinitions program builder)
         builder = mkBuilder program
+-}
 
 -- | Create a new module
 mkModule :: [AST.Definition] ->  AST.Module
@@ -70,7 +70,11 @@ mkModule defs = AST.Module {
       AST.moduleDataLayout=Nothing,
       AST.moduleTargetTriple=Nothing,
       AST.moduleDefinitions=defs
-  }
+}
+
+
+type IRString = String
+
 
 -- mkBoxedThunk
 
@@ -93,6 +97,7 @@ tagty = i32ty
 
 type BindingId = Int
 -- | Builder that maintains context of what we're doing when constructing IR.
+{-
 data Builder = Builder {
   bindings :: [Binding]
 } 
@@ -112,6 +117,12 @@ mkBuilder binds = Builder {
   bindings = binds >>= collectBindingsInBinding
 }
 
+mkSwitchFunction :: State FunctionBuilder ()
+mkSwitchFunction = return ()
+-}
+
+
+{-
 mkSwitchFunction :: Builder -> AST.Definition
 mkSwitchFunction (Builder binds) = AST.GlobalDefinition (G.functionDefaults {
   G.name = strToName "mainSwitch",
@@ -134,10 +145,10 @@ mkSwitchFunction (Builder binds) = AST.GlobalDefinition (G.functionDefaults {
 
     dests :: [(Constant, AST.Name)]
     dests = map (\(i, bind) -> (i32val i, bind ^. bindingName ^. getVariable & strToName)) (zip [1..] binds)
+-}
 
-continuationType :: Type
-continuationType = undefined
 
+{-
 -- | Create the main "switching" function.
 mkSTGDefinitions :: Program -> Builder -> [AST.Definition]
 mkSTGDefinitions p builder = [mkSwitchFunction builder]
@@ -148,4 +159,4 @@ data ValueTag = ValueTagInt | ValueTagFloat deriving(Show, Enum, Bounded)
 -- | Convert a 'ValueTag' to 'Int' for LLVM codegen
 valueTagToInt :: ValueTag -> Int
 valueTagToInt = fromEnum
-
+-}

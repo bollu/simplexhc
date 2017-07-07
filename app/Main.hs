@@ -6,7 +6,8 @@ module Main where
 import StgLanguage
 import StgParser
 import StgPushEnterMachine
-import StgLLVMBackend
+import StgToIR
+import IRToLLVM
 import Stg
 -- import StgLLVMBackend
 
@@ -19,6 +20,7 @@ import Control.Exception
 import Control.Monad
 import Data.List
 import Data.Monoid
+import ColorUtils
 
 
 import IR
@@ -95,7 +97,10 @@ runFileLLVM fpath = do
                               putStrLn  $ compileErr
         (Right program) -> do
                              putStrLn "LLVM module: "
-                             str <- getIRString program
+                             let module' = programToModule program
+                             putStrLn "*** module:"
+                             putStrLn . prettyToString $ module'
+                             str <- moduleToLLVMIRString module'
                              putStr  str
 main :: IO ()
 main = do
