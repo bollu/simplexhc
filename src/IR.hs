@@ -143,7 +143,7 @@ instance Pretty Function where
   pretty (func@Function{functionType=(paramTypes, returnType),..}) =
     vcat [funcheader, indent 4 prettyBBS] where
       funcheader :: Doc a
-      funcheader = pretty "fn" <+> pretty functionLabel <+> braces (params) <+> pretty "->" <+> pretty returnType
+      funcheader = pretty "fn" <+> pretty functionLabel <+> brackets (params) <+> pretty "->" <+> pretty returnType
       formatParam :: IRType -> Label Param -> Doc a
       formatParam ty lbl = pretty lbl <+> colon <+> pretty ty
       params :: Doc a
