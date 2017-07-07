@@ -21,10 +21,10 @@ instance Show ConstructorName where
 instance Pretty ConstructorName where
     pretty = pretty . show
 
-newtype VarName = VarName { _getVariable :: String } deriving(Ord, Eq)
+newtype VarName = VarName { _getVarName :: String } deriving(Ord, Eq)
 
 instance Pretty VarName where
-    pretty var = mkStyleTag (pretty "var:") <+> (pretty (_getVariable var))
+    pretty var = mkStyleTag (pretty "var:") <+> (pretty (_getVarName var))
 
 instance Show VarName where
     show = prettyToString

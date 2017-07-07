@@ -6,11 +6,15 @@ import qualified Data.Map as M
 import Data.List (sortOn)
 
 
-data IRType = IRTyInt Int | IRTyVoid -- ^ number of bits
+-- | A phantom type used to refer to function parameter labels
+data Param
+
+-- | Types that IR values can have
+data IRType = IRTypeInt Int | IRTypeVoid -- ^ number of bits
 
 instance Pretty IRType where
-  pretty (IRTyInt i) = pretty "int" <+> pretty i
-  pretty IRTyVoid = pretty "void"
+  pretty (IRTypeInt i) = pretty "int" <+> pretty i
+  pretty IRTypeVoid = pretty "void"
 
 -- | A label that uses the phantom @a as a type based discriminator
 data Label a = Label { unLabel ::  String } deriving(Eq, Ord)
@@ -18,11 +22,12 @@ instance Pretty (Label a) where
   pretty (Label s) = pretty s
 
 -- a Value, which can either be a constant, or a reference to an instruction.
-data Value = ValueConstInt Int | ValueInstRef (Label Inst)
+data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param)
 
 instance Pretty Value where
   pretty (ValueConstInt i) = pretty i <> pretty "#"
   pretty (ValueInstRef name) = pretty "%" <> pretty name
+  pretty (ValueParamRef name) = pretty "%param." <> pretty name
 
 -- | Instructions that we allow within a basic block.
 data Inst  where
@@ -33,7 +38,7 @@ data Inst  where
   InstAnd :: Value -> Value -> Inst
   InstLoad :: Value -> Inst 
   InstStore :: Value -> Value -> Inst 
-  InstPhi :: NE.NonEmpty (BBId, Value) -> Inst
+  InstPhi :: NE.NonEmpty (BBLabel, Value) -> Inst
 
 instance Pretty Inst where
   pretty (InstAlloc) = pretty "alloc"
@@ -62,7 +67,8 @@ instance Pretty a => Pretty (Named a) where
 
 
 -- | Used to identify basic blocks
-type BBId = Label BasicBlock
+-- | Note that these are usually *unique*
+type BBLabel = Label BasicBlock
 -- | A basic block. Single-entry, multiple-exit.
 data BasicBlock = BasicBlock { bbInsts :: [Named Inst], bbRetInst :: RetInst , bbLabel :: Label BasicBlock }
 
@@ -80,11 +86,12 @@ instance Pretty BasicBlock where
 -- | Return instructions are the only ones that can cause control flow
 -- | between one basic block to another.
 data RetInst =
-  RetInstConditionalBranch Value BBId BBId |
-  RetInstBranch BBId |
+  RetInstConditionalBranch Value BBLabel BBLabel |
+  RetInstBranch BBLabel |
   RetInstSwitch {
-    switchDefaultBB :: BBId,
-    switchBBs :: [(Value, BBId)]
+    switchValue :: Value,
+    switchDefaultBB :: BBLabel,
+    switchBBs :: [(Value, BBLabel)]
   } | 
   RetInstTerminal
 
@@ -92,9 +99,10 @@ instance Pretty RetInst where
   pretty (RetInstTerminal) = pretty "TERMINAL"
   pretty (RetInstBranch next) = pretty "branch" <+> pretty next
   pretty (RetInstConditionalBranch cond then' else') = pretty "branch if" <+> pretty cond <+> pretty "then" <+> pretty then' <+> pretty "else" <+> pretty else'
-  pretty (RetInstSwitch default' switches ) =
-    pretty "switch" <+> brackets (pretty "default: " <+> pretty default') <+>
-      hcat (map pretty switches)
+  pretty (RetInstSwitch val default' switches ) =
+    vcat [pretty "switch on" <+> pretty val <+>
+            brackets (pretty "default:" <+> pretty default'),
+          indent 4 (vcat (map pretty switches))]
 
 
 
@@ -105,25 +113,28 @@ type BBOrder = Int
 -- | A function is a list of basic blocks and parameters, and return type
 data Function = Function {
   -- A map from the basic block ID to a basic block.
-  functionBBMap :: M.Map BBId BasicBlock,
+  functionBBMap :: M.Map BBLabel BasicBlock,
   -- The ID of the entry basic block.
-  functionEntryBBId :: BBId,
+  functionEntryBBLabel :: BBLabel,
   -- The map from a BB to the order.
-  functionBBOrderingMap :: M.Map BBId BBOrder,
+  functionBBOrderingMap :: M.Map BBLabel BBOrder,
   -- The type of the function ([parameter types], return type)
   functionType :: ([IRType], IRType)
 }
 
 -- | Label for a function
-type FunctionId = Label Function
+type FunctionLabel = Label Function
 
 -- TODO: use view patterns to extract only the values of the dict.
 -- | Get the functions in the basic block in the order they were created
 getBBFunctionsInOrder :: Function -> [BasicBlock]
 getBBFunctionsInOrder Function { functionBBOrderingMap=bbToOrdering,
                                  functionBBMap=bbIdToBBMap} =
-      map (bbIdToBBMap M.!) sortedKeys where
-      sortedKeys = sortOn (bbToOrdering M.!) (M.keys bbIdToBBMap)
+    map (bbIdToBBMap M.!) unsortedKeys where
+      sortedKeys :: [BBLabel]
+      sortedKeys = sortOn  (bbToOrdering M.!) unsortedKeys
+      unsortedKeys :: [BBLabel]
+      unsortedKeys = (M.keys bbIdToBBMap)
 
 instance Pretty Function where
   pretty func = vcat . map pretty . getBBFunctionsInOrder $ func
