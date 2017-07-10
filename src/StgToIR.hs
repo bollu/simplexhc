@@ -17,9 +17,19 @@ getBindsInProgram :: Program -> [Binding]
 getBindsInProgram prog = prog >>= collectBindingsInBinding
 
 buildMatchBBForBind :: (Binding, BindingIntID) ->  State FunctionBuilder (Value, BBLabel)
-buildMatchBBForBind (Binding{..}, bbintid)  = do
+buildMatchBBForBind (Binding{..}, bindingid)  = do
   bbid <- createBB (Label ("switch." ++ (_getVarName _bindingName)))
-  return (ValueConstInt bbintid, bbid)
+  return (ValueConstInt bindingid, bbid)
+
+
+buildFnForBind :: (Binding, BindingIntID) -> State ModuleBuilder FunctionLabel
+buildFnForBind (Binding{..}, bindingid) = let
+    paramsty = []
+    retty = IRTypeVoid
+    fnname = ("bindingfn." ++ (_getVarName _bindingName))
+  in
+    runFunctionBuilder paramsty retty fnname $ do
+      return ()
 
 buildMatcherFn :: [Binding] -> State FunctionBuilder ()
 buildMatcherFn binds = do
@@ -34,4 +44,5 @@ programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
     let binds = getBindsInProgram p
     runFunctionBuilder [IRTypeInt 32] IRTypeVoid "main" (buildMatcherFn binds)
+    switchfns <- for (zip binds [1..]) buildFnForBind
     return ()

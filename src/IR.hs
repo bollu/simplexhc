@@ -51,7 +51,7 @@ instance Pretty Inst where
                                 pretty "in" <+> pretty slot
   pretty (InstPhi philist) = 
     hcat (punctuate comma (NE.toList (fmap (\(bbid, val) ->
-                                brackets (pretty bbid <+> pretty val)) philist)))
+                                parens (pretty bbid <+> pretty val)) philist)))
 
 -- | Represents @a that is optionally named by a @Label a
 data Named a = Named { namedName :: Label a, namedData :: a }
@@ -143,7 +143,7 @@ instance Pretty Function where
   pretty (func@Function{functionType=(paramTypes, returnType),..}) =
     vcat [funcheader, indent 4 prettyBBS] where
       funcheader :: Doc a
-      funcheader = pretty "fn" <+> pretty functionLabel <+> brackets (params) <+> pretty "->" <+> pretty returnType
+      funcheader = pretty "fn" <+> pretty functionLabel <+> parens (params) <+> pretty "->" <+> pretty returnType
       formatParam :: IRType -> Label Param -> Doc a
       formatParam ty lbl = pretty lbl <+> colon <+> pretty ty
       params :: Doc a
