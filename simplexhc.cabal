@@ -23,7 +23,8 @@ library
                        StgToIR,
                        IRToLLVM,
                        IR,
-                       IRBuilder
+                       IRBuilder,
+                       OrderedMap
                        -- LoweringFFI
 
   build-depends:       base >= 4.7 && <= 5,
