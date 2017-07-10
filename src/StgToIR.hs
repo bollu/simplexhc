@@ -44,5 +44,5 @@ programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
     let binds = getBindsInProgram p
     runFunctionBuilder [IRTypeInt 32] IRTypeVoid "main" (buildMatcherFn binds)
-    switchfns <- for (zip binds [1..]) buildFnForBind
+    -- switchfns <- for (zip binds [1..]) buildFnForBind
     return ()

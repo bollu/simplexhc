@@ -16,7 +16,8 @@ module IRBuilder(
   runModuleBuilder
   ) where
 import IR
-import qualified Data.Map.Strict as M
+-- import qualified Data.Map.Strict as M
+import qualified OrderedMap as M
 import Data.Traversable
 import Data.Foldable
 import Control.Monad.State.Strict
@@ -25,17 +26,11 @@ import Data.Foldable (length)
 
 type Literal = String
 
-{-
--- At some point, I need this. This is more convenient than overloading the key to store the insertion time.
--- | A dictionary that orders elements by insertion time
-data OrderedDict k v = OrderedDict { orderedDictMap :: M.Map k v, orderedDictOrder :: [k] } deriving(Monoid, Show, Functor, Foldable, Traversable)
--}
-
 -- | Make a key unique for a map by using the function f and a function
 -- | that takes the key and an ID that is a bump counter.
-makeKeyUnique_ :: Ord k => (k -> Int -> k) -> M.Map k v -> k -> k
+makeKeyUnique_ :: Ord k => (k -> Int -> k) -> M.OrderedMap k v -> k -> k
 makeKeyUnique_ f m k =  unique_ f m 0 k where
-  unique_ :: Ord k => (k -> Int -> k) -> M.Map k v -> Int -> k -> k
+  unique_ :: Ord k => (k -> Int -> k) -> M.OrderedMap k v -> Int -> k -> k
   unique_ f m i k = let uniquekey = f k i in
                         case M.lookup uniquekey m of
                           Nothing -> uniquekey
@@ -47,21 +42,8 @@ appendLabelWithId_ (Label l) i = if i == 0
                                  then Label l 
                                  else Label (l ++ "." ++ show i)
 
-makeLabelUniqueKey_ :: Label a -> M.Map (Label a) v -> Label a
+makeLabelUniqueKey_ :: Label a -> M.OrderedMap (Label a) v -> Label a
 makeLabelUniqueKey_ l m = makeKeyUnique_ appendLabelWithId_ m l 
-
-{-
--- | Insert into the map by first making the key unique and then inserting
--- | the value into the map
-insertWithUniqueKey_ :: Ord k => (k -> Int -> k) -> -- ^ Make the key unique
-                        k -> v -> M.Map k v -> (k,  M.Map k v)
-insertWithUniqueKey_  f k v m = let uniquekey = makeKeyUnique f m k in
-                                   (uniquekey, M.insert uniquekey v m)
--- | Insert into a map by making the label unique
-insertWithUniqueLabel :: (Label a) -> v -> M.Map (Label a) v -> 
-                         (Label a, M.Map (Label a) v)
-insertWithUniqueLabel =  insertWithUniqueKey_ appendLabelWithId_
--}
 
 data FunctionBuilder = FunctionBuilder {
   -- | The first BB that is present in the module
@@ -69,15 +51,15 @@ data FunctionBuilder = FunctionBuilder {
  -- | The BB the builder is currently focused on
   currentBBLabel :: BBLabel,
   -- | Mapping from BBLabel to BasicBlock
-  bbLabelToBB :: M.Map BBLabel BasicBlock,
+  bbLabelToBB :: M.OrderedMap BBLabel BasicBlock,
   -- | counter to generate new instruction name
   tmpInstNamesCounter :: Int,
   -- | Mapping from BBLabel to the order in which it was created
-  bbLabelToOrder :: M.Map BBLabel BBOrder,
+  -- bbLabelToOrder :: M.OrderedMap BBLabel BBOrder,
   -- | The type of the function
   type' :: ([IRType], IRType),
   -- | Map between parameters and their corresponding value
-  paramLabelToParam :: M.Map (Label Param) Value,
+  paramLabelToParam :: M.OrderedMap (Label Param) Value,
   -- | Unique label of the function
   functionBuilderFunctionLabel :: FunctionLabel
 }
@@ -103,7 +85,6 @@ _createFunctionBuilder paramsty retty label =
         entryBBLabel=Label "INVALID BB",
         currentBBLabel=Label "INVALID BB",
         bbLabelToBB=mempty,
-        bbLabelToOrder=mempty,
         tmpInstNamesCounter=0,
         paramLabelToParam=M.fromList $ map (\pname -> (pname, ValueParamRef pname)) pnames,
         type'=(paramsty, retty),
@@ -129,15 +110,12 @@ focusBB id = modify (\b-> b { currentBBLabel=id })
 createBB :: Label BasicBlock -> State FunctionBuilder BBLabel
 createBB name = do
   idtobbs <- gets bbLabelToBB
-  idtoorder <- gets bbLabelToOrder
-
   let nbbs = M.size idtobbs
   let bborder = nbbs -- We can use the number of BBs as a unique stamp on this BB that will
                      -- provide a total order in terms of time of creation.
   let newbbid = makeLabelUniqueKey_ name idtobbs :: BBLabel
   let newbb = defaultBB { bbLabel=newbbid }
-  modify (\b -> b { bbLabelToBB = M.insert newbbid newbb idtobbs,
-                    bbLabelToOrder = M.insert newbbid bborder idtoorder} )
+  modify (\b -> b { bbLabelToBB = M.insert newbbid newbb idtobbs })
   return newbbid
 
 
@@ -188,7 +166,7 @@ setRetInst i = do
 -- == Module builder ==
 
 data ModuleBuilder = ModuleBuilder {
-  moduleBuilderFunctions :: M.Map FunctionLabel Function
+  moduleBuilderFunctions :: M.OrderedMap FunctionLabel Function
 }
 
 _appendFunctionToModuleBuilder :: Label Function -> Function -> ModuleBuilder -> ModuleBuilder
@@ -202,7 +180,6 @@ runFunctionBuilder :: [IRType] -> IRType -> String -> State FunctionBuilder () -
 runFunctionBuilder ptys retty name fs = do
   -- generate a unique label
   label <- gets (makeLabelUniqueKey_ (Label name) . moduleBuilderFunctions)
-  -- fncount <- gets (length . moduleBuilderFunctions)
   let fnbuilder = execState fs (_createFunctionBuilder ptys retty label)
   let fn = _createFunctionFromBuilder fnbuilder
   modify (_appendFunctionToModuleBuilder label fn)
@@ -229,7 +206,6 @@ _createFunctionFromBuilder  FunctionBuilder{..} =
   Function {
     functionBBMap=bbLabelToBB,
     functionEntryBBLabel=entryBBLabel,
-    functionBBOrderingMap=bbLabelToOrder,
     functionType=type',
     functionLabel=functionBuilderFunctionLabel,
     functionParamLabels=map _getParamName [0..(length paramLabelToParam)]

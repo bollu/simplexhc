@@ -97,9 +97,10 @@ runFileLLVM fpath = do
                               putStrLn  $ compileErr
         (Right program) -> do
                              putStrLn "LLVM module: "
+                             putStrLn "*** Internal IR :"
                              let module' = programToModule program
-                             putStrLn "*** module:"
                              putStrLn . prettyToString $ module'
+                             putStrLn "*** LLVM IR :"
                              str <- moduleToLLVMIRString module'
                              putStr  str
 main :: IO ()

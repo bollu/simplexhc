@@ -2,25 +2,37 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE RecordWildCards #-}
 module OrderedMap(OrderedMap,
   fromList,
   size,
   adjust,
   insert, 
+  elems,
+  toList,
+  keys,
+  (!),
   OrderedMap.lookup) where
 import qualified Data.Map.Strict as M
 import Data.Monoid
+import ColorUtils
+import Data.Text.Prettyprint.Doc 
 
 -- At some point, I need this. This is more convenient than overloading the key to store the insertion time.
 -- | A dictionary that orders elements by insertion time
 data OrderedMap k v = OrderedMap { map' :: M.Map k v, order :: [k] } deriving(Show, Functor, Foldable, Traversable)
+
+instance (Ord k, Pretty k, Pretty v) => Pretty (OrderedMap k v) where
+  pretty ok = vcat (map pkv (toList ok)) where
+    pkv :: (Pretty k, Pretty v) => (k, v) -> Doc ann
+    pkv (k, v) = pretty k <+> pretty ":" <+> pretty v
 
 instance Ord k => Monoid (OrderedMap k v) where
   mempty :: OrderedMap k v
   mempty = OrderedMap mempty mempty
 
   mappend :: OrderedMap k v -> OrderedMap k v -> OrderedMap k v
-  mappend (OrderedMap m o) (OrderedMap m' o') = OrderedMap (m <> m') (o <> o')
+  mappend (OrderedMap m o) (OrderedMap m' o') = OrderedMap (m `mappend` m') (o `mappend` o')
 
 liftMapEdit_ :: (M.Map k v -> M.Map k v) -> OrderedMap k v -> OrderedMap k v
 liftMapEdit_ f (OrderedMap map' order) = OrderedMap (f map') order
@@ -28,8 +40,10 @@ liftMapEdit_ f (OrderedMap map' order) = OrderedMap (f map') order
 liftMapExtract_ :: (M.Map k v -> a) -> OrderedMap k v -> a
 liftMapExtract_ f (OrderedMap map' _) = f map'
 
+-- | NOTE: this will maintain the order of insertion. Elements that are inserted
+-- | later are returned later in the `keys`, `elems`.
 insert  :: Ord k => k -> a -> OrderedMap k a -> OrderedMap k a
-insert k a  = liftMapEdit_ (M.insert k a)
+insert k a OrderedMap{..} = OrderedMap (M.insert k a map') (order ++ [k])
 
 lookup :: Ord k => k -> OrderedMap k a -> Maybe a
 lookup k = liftMapExtract_ (M.lookup k)
@@ -46,6 +60,16 @@ keys (OrderedMap{order=order}) = order
 elems :: Ord k => OrderedMap k a -> [a]
 elems (OrderedMap{order=order, map'=map'}) = map (map' M.!) order
 
+-- | Return the list of key value pairs in the order of insertion.
+toList :: (Ord k, Pretty k, Pretty a) => OrderedMap k a -> [(k, a)]
+toList omap = map (\k -> (k, omap OrderedMap.! k)) (keys omap)
 
 adjust :: Ord k => (a -> a) -> k -> OrderedMap k a -> OrderedMap k a
 adjust f k = liftMapEdit_ (M.adjust f k)
+
+(!) :: (Ord k, Pretty k, Pretty a) => OrderedMap k a -> k -> a
+ok ! k = 
+  case (OrderedMap.lookup k ok) of
+           Just a -> a
+           Nothing -> error . docToString $ 
+               vcat [pretty "key: " <+> pretty k, indent 4 (pretty ok)]

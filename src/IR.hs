@@ -2,8 +2,7 @@
 module IR where
 import Data.Text.Prettyprint.Doc as PP
 import qualified Data.List.NonEmpty as NE
-import qualified Data.Map as M
-import Data.List (sortOn)
+import qualified OrderedMap as M
 
 
 -- | A phantom type used to refer to function parameter labels
@@ -112,11 +111,10 @@ type BBOrder = Int
 -- | A function is a list of basic blocks and parameters, and return type
 data Function = Function {
   -- A map from the basic block ID to a basic block.
-  functionBBMap :: M.Map BBLabel BasicBlock,
+  functionBBMap :: M.OrderedMap BBLabel BasicBlock,
   -- The ID of the entry basic block.
   functionEntryBBLabel :: BBLabel,
   -- The map from a BB to the order.
-  functionBBOrderingMap :: M.Map BBLabel BBOrder,
   -- The type of the function ([parameter types], return type)
   functionType :: ([IRType], IRType),
   -- The parameters names of the function
@@ -131,13 +129,7 @@ type FunctionLabel = Label Function
 -- TODO: use view patterns to extract only the values of the dict.
 -- | Get the functions in the basic block in the order they were created
 getBBFunctionsInOrder :: Function -> [BasicBlock]
-getBBFunctionsInOrder Function { functionBBOrderingMap=bbToOrdering,
-                                 functionBBMap=bbIdToBBMap} =
-    map (bbIdToBBMap M.!) unsortedKeys where
-      sortedKeys :: [BBLabel]
-      sortedKeys = sortOn  (bbToOrdering M.!) unsortedKeys
-      unsortedKeys :: [BBLabel]
-      unsortedKeys = (M.keys bbIdToBBMap)
+getBBFunctionsInOrder Function {functionBBMap=bbIdToBBMap} = M.elems bbIdToBBMap
 
 instance Pretty Function where
   pretty (func@Function{functionType=(paramTypes, returnType),..}) =
