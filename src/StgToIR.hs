@@ -20,7 +20,7 @@ getBindsInProgram prog = prog >>= collectBindingsInBinding
 
 buildMatchBBForBind :: M.OrderedMap VarName FunctionLabel -> (Binding, BindingIntID) -> State FunctionBuilder (Value, BBLabel)
 buildMatchBBForBind fns (Binding{..}, bindingid) = do
-  bbid <- createBB (Label ("switch." ++ (_getVarName _bindingName)))
+  bbid <- createBB  ("switch." ++ (_getVarName _bindingName))
   focusBB bbid
   setRetInst (RetInstReturn (ValueFnPointer (fns M.! _bindingName)))
   return ((ValueConstInt bindingid), bbid)
@@ -40,15 +40,24 @@ buildMatcherFn binds fns = do
   entrybb <- getEntryBBLabel
   switchBBs <- for (zip binds  [1..]) (buildMatchBBForBind fns)
   param <- getParamValue 0
-  errBB <- createBB (Label "switch.fail")
+  errBB <- createBB "switch.fail"
   focusBB entrybb
   setRetInst (RetInstSwitch param errBB  switchBBs)
 
+type StackRawLabel = GlobalLabel
+type StackBoxLabel = GlobalLabel
+buildStackPointers :: State ModuleBuilder (StackRawLabel, StackBoxLabel)
+buildStackPointers = do
+  raw <- createGlobalVariable "stackraw" (IRTypePointer (IRTypeInt 32))
+  box <- createGlobalVariable "stackbox" (IRTypePointer (IRTypeInt 0))
+  return (raw, box)
 
 programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
+    (rawstack, boxstack) <- buildStackPointers
     let binds = getBindsInProgram p
     bindingfns <- for (zip binds [1..]) buildFnForBind
     let bindingfnmap = M.fromList [(_bindingName $ b, fn) | b <- binds | fn <- bindingfns]
-    runFunctionBuilder [IRTypeInt 32] IRTypeVoid "main" (buildMatcherFn binds bindingfnmap)
+    let matcherRetTy = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
+    runFunctionBuilder [IRTypeInt 32] matcherRetTy "matcher" (buildMatcherFn binds bindingfnmap)
     return ()

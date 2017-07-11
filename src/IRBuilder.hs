@@ -13,7 +13,8 @@ module IRBuilder(
   setRetInst,
   getParamValue,
   runFunctionBuilder,
-  runModuleBuilder
+  runModuleBuilder,
+  createGlobalVariable
   ) where
 import IR
 -- import qualified Data.Map.Strict as M
@@ -42,8 +43,9 @@ appendLabelWithId_ (Label l) i = if i == 0
                                  then Label l 
                                  else Label (l ++ "." ++ show i)
 
-makeLabelUniqueKey_ :: Label a -> M.OrderedMap (Label a) v -> Label a
-makeLabelUniqueKey_ l m = makeKeyUnique_ appendLabelWithId_ m l 
+makeLabelUniqueKey_ :: String -> M.OrderedMap (Label a) v -> Label a
+makeLabelUniqueKey_ l m = 
+  makeKeyUnique_ appendLabelWithId_ m (Label l) 
 
 data FunctionBuilder = FunctionBuilder {
   -- | The first BB that is present in the module
@@ -77,7 +79,7 @@ _createFunctionBuilder paramsty retty label =
   execState mkDefaultBB initbuilder
     where
       mkDefaultBB = do
-        bbid <- createBB (Label "entry")
+        bbid <- createBB "entry"
         -- Set the "entry" basic block so we can later give it to IRProgram
         modify (\b -> b { entryBBLabel = bbid })
         focusBB bbid
@@ -107,7 +109,7 @@ focusBB :: BBLabel -> State FunctionBuilder ()
 focusBB id = modify (\b-> b { currentBBLabel=id })
 
 -- | Append a new basic block. DOES NOT switch the currentBBLabel to the new basic block. For that, see focusBB
-createBB :: Label BasicBlock -> State FunctionBuilder BBLabel
+createBB :: String -> State FunctionBuilder BBLabel
 createBB name = do
   idtobbs <- gets bbLabelToBB
   let nbbs = M.size idtobbs
@@ -180,7 +182,7 @@ _appendFunctionToModuleBuilder label fn (mb@ModuleBuilder{..}) =
 runFunctionBuilder :: [IRType] -> IRType -> String -> State FunctionBuilder () -> State ModuleBuilder FunctionLabel
 runFunctionBuilder ptys retty name fs = do
   -- generate a unique label
-  label <- gets (makeLabelUniqueKey_ (Label name) . mbFunctions)
+  label <- gets (makeLabelUniqueKey_ name . mbFunctions)
   let fnbuilder = execState fs (_createFunctionBuilder ptys retty label)
   let fn = _createFunctionFromBuilder fnbuilder
   modify (_appendFunctionToModuleBuilder label fn)
@@ -218,4 +220,13 @@ getParamValue :: Int -> State FunctionBuilder Value
 getParamValue i = do
     params' <- gets paramLabelToParam
     return (assert (i < length params' && i >= 0) (params' M.! (_getParamName i)))
+
+-- | Create an IR.GlobalVariable with the given name
+createGlobalVariable :: String -> IRType -> State ModuleBuilder GlobalLabel
+createGlobalVariable name ty = do
+  mglobals <- gets mbGlobals
+  let label = makeLabelUniqueKey_ name mglobals
+  let global = GlobalValue { gvType=ty, gvValue = Nothing }
+  modify (\mb -> mb { mbGlobals=M.insert label global mglobals})
+  return label
 

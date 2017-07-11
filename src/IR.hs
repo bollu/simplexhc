@@ -17,7 +17,7 @@ data IRType = IRTypeInt Int | -- ^ number of bits
 instance Pretty IRType where
   pretty (IRTypeInt i) = pretty "int" <+> pretty i
   pretty IRTypeVoid = pretty "void"
-  pretty (IRTypePointer ty) = hcat [pretty "^", pretty ty]
+  pretty (IRTypePointer ty) = hcat [parens (pretty ty), pretty "^"]
   pretty (IRTypeFunction params ret) = 
     parens (hcat . punctuate comma $ pparams) <+> pretty "->" <+> pretty ret where
       pparams = map pretty params
@@ -31,11 +31,11 @@ instance Pretty (Label a) where
 data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function)
 
 -- a GlobalValue, that is a value of a global variable.
-data GlobalValue = GlobalValueUninitialized
+data GlobalValue = GlobalValue { gvType :: IRType, gvValue :: Maybe Value }
 type GlobalLabel = Label GlobalValue
 
 instance Pretty GlobalValue where
-  pretty (GlobalValueUninitialized) = pretty "uninitialized"
+  pretty (GlobalValue{..}) = pretty "@_" <+> pretty gvValue <+> colon <+> pretty gvType
 
 instance Pretty Value where
   pretty (ValueConstInt i) = pretty i <> pretty "#"
@@ -111,7 +111,7 @@ data RetInst =
   RetInstUndefined
 
 instance Pretty RetInst where
-  pretty (RetInstUndefined) = pretty "RETUNDEFINED"
+  pretty (RetInstUndefined) = pretty "RET UNDEFINED"
   pretty (RetInstBranch next) = pretty "branch" <+> pretty next
   pretty (RetInstConditionalBranch cond then' else') = pretty "branch if" <+> pretty cond <+> pretty "then" <+> pretty then' <+> pretty "else" <+> pretty else'
   pretty (RetInstSwitch val default' switches ) =
@@ -169,7 +169,15 @@ instance Pretty Module where
   pretty (Module funcs globals) = let
     mkGlobalPretty :: (GlobalLabel, GlobalValue) -> Doc a
     -- TODO: make GlobalLabel a newtype.
-    mkGlobalPretty (lbl, val) = hcat [pretty "@", pretty lbl] <+> pretty ":=" <+> pretty val
+    mkGlobalPretty (lbl, GlobalValue{..}) = 
+       mkName lbl <+> colon <+> pretty gvType <+> mkRhs gvValue
+    -- | Pretty name for the label 
+    mkName :: GlobalLabel -> Doc a
+    mkName name = hcat [pretty "@", pretty name]
+    -- | Pretty RHS
+    mkRhs :: Maybe Value -> Doc a
+    mkRhs Nothing = mempty
+    mkRhs (Just v) = pretty ":=" <+> pretty v
     in vcat $ (map mkGlobalPretty (M.toList globals)) ++ (map pretty funcs)
 
 -- Add a function to a module
