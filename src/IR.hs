@@ -9,11 +9,18 @@ import qualified OrderedMap as M
 data Param
 
 -- | Types that IR values can have
-data IRType = IRTypeInt Int | IRTypeVoid -- ^ number of bits
+data IRType = IRTypeInt Int | -- ^ number of bits 
+              IRTypeVoid |
+              IRTypePointer IRType |
+              IRTypeFunction [IRType] IRType
 
 instance Pretty IRType where
   pretty (IRTypeInt i) = pretty "int" <+> pretty i
   pretty IRTypeVoid = pretty "void"
+  pretty (IRTypePointer ty) = hcat [pretty "^", pretty ty]
+  pretty (IRTypeFunction params ret) = 
+    parens (hcat . punctuate comma $ pparams) <+> pretty "->" <+> pretty ret where
+      pparams = map pretty params
 
 -- | A label that uses the phantom @a as a type based discriminator
 data Label a = Label { unLabel ::  String } deriving(Eq, Ord)
@@ -21,12 +28,13 @@ instance Pretty (Label a) where
   pretty (Label s) = pretty s
 
 -- a Value, which can either be a constant, or a reference to an instruction.
-data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param)
+data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function)
 
 instance Pretty Value where
   pretty (ValueConstInt i) = pretty i <> pretty "#"
   pretty (ValueInstRef name) = pretty "%" <> pretty name
   pretty (ValueParamRef name) = pretty "%param." <> pretty name
+  pretty (ValueFnPointer name) = pretty "%fnptr." <> pretty name
 
 -- | Instructions that we allow within a basic block.
 data Inst  where
@@ -92,6 +100,7 @@ data RetInst =
     switchDefaultBB :: BBLabel,
     switchBBs :: [(Value, BBLabel)]
   } |
+  RetInstReturn Value | 
   RetInstTerminal
 
 instance Pretty RetInst where
@@ -102,6 +111,7 @@ instance Pretty RetInst where
     vcat [pretty "switch on" <+> pretty val <+>
             brackets (pretty "default:" <+> pretty default'),
           indent 4 (vcat (map pretty switches))]
+  pretty (RetInstReturn value) = pretty "return" <+> pretty value
 
 
 
