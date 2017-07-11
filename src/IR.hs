@@ -30,6 +30,13 @@ instance Pretty (Label a) where
 -- a Value, which can either be a constant, or a reference to an instruction.
 data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function)
 
+-- a GlobalValue, that is a value of a global variable.
+data GlobalValue = GlobalValueUninitialized
+type GlobalLabel = Label GlobalValue
+
+instance Pretty GlobalValue where
+  pretty (GlobalValueUninitialized) = pretty "uninitialized"
+
 instance Pretty Value where
   pretty (ValueConstInt i) = pretty i <> pretty "#"
   pretty (ValueInstRef name) = pretty "%" <> pretty name
@@ -81,7 +88,7 @@ data BasicBlock = BasicBlock { bbInsts :: [Named Inst], bbRetInst :: RetInst , b
 
 -- | Default basic block.
 defaultBB :: BasicBlock
-defaultBB = BasicBlock [] (RetInstTerminal) (Label "undefined")
+defaultBB = BasicBlock [] (RetInstUndefined) (Label "bbundefined")
 
 -- TODO: replace nest with indent
 instance Pretty BasicBlock where
@@ -101,10 +108,10 @@ data RetInst =
     switchBBs :: [(Value, BBLabel)]
   } |
   RetInstReturn Value | 
-  RetInstTerminal
+  RetInstUndefined
 
 instance Pretty RetInst where
-  pretty (RetInstTerminal) = pretty "TERMINAL"
+  pretty (RetInstUndefined) = pretty "RETUNDEFINED"
   pretty (RetInstBranch next) = pretty "branch" <+> pretty next
   pretty (RetInstConditionalBranch cond then' else') = pretty "branch if" <+> pretty cond <+> pretty "then" <+> pretty then' <+> pretty "else" <+> pretty else'
   pretty (RetInstSwitch val default' switches ) =
@@ -112,8 +119,6 @@ instance Pretty RetInst where
             brackets (pretty "default:" <+> pretty default'),
           indent 4 (vcat (map pretty switches))]
   pretty (RetInstReturn value) = pretty "return" <+> pretty value
-
-
 
 -- | Used to order basic blocks
 type BBOrder = Int
@@ -156,15 +161,20 @@ instance Pretty Function where
 
 -- A module consists of stuff that is global
 data Module = Module {
-  moduleFunctions :: [Function]
+  moduleFunctions :: [Function],
+  moduleGlobals :: M.OrderedMap GlobalLabel GlobalValue
 }
 
 instance Pretty Module where
-  pretty (Module funcs) = vcat (map pretty funcs)
+  pretty (Module funcs globals) = let
+    mkGlobalPretty :: (GlobalLabel, GlobalValue) -> Doc a
+    -- TODO: make GlobalLabel a newtype.
+    mkGlobalPretty (lbl, val) = hcat [pretty "@", pretty lbl] <+> pretty ":=" <+> pretty val
+    in vcat $ (map mkGlobalPretty (M.toList globals)) ++ (map pretty funcs)
 
 -- Add a function to a module
 addFunctionToModule :: Function -> Module -> Module
-addFunctionToModule fn mod = Module { moduleFunctions = fn:(moduleFunctions mod) }
+addFunctionToModule fn mod@Module{..} = mod { moduleFunctions = fn:moduleFunctions }
 
 
 

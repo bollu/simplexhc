@@ -61,7 +61,7 @@ data FunctionBuilder = FunctionBuilder {
   -- | Map between parameters and their corresponding value
   paramLabelToParam :: M.OrderedMap (Label Param) Value,
   -- | Unique label of the function
-  functionBuilderFunctionLabel :: FunctionLabel
+  fbFunctionLabel :: FunctionLabel
 }
 
 
@@ -88,7 +88,7 @@ _createFunctionBuilder paramsty retty label =
         tmpInstNamesCounter=0,
         paramLabelToParam=M.fromList $ map (\pname -> (pname, ValueParamRef pname)) pnames,
         type'=(paramsty, retty),
-        functionBuilderFunctionLabel=label
+        fbFunctionLabel=label
 
     }) where
       -- | initial list of parameter names
@@ -166,20 +166,21 @@ setRetInst i = do
 -- == Module builder ==
 
 data ModuleBuilder = ModuleBuilder {
-  moduleBuilderFunctions :: M.OrderedMap FunctionLabel Function
+  mbFunctions :: M.OrderedMap FunctionLabel Function,
+  mbGlobals :: M.OrderedMap GlobalLabel GlobalValue
 }
 
 _appendFunctionToModuleBuilder :: Label Function -> Function -> ModuleBuilder -> ModuleBuilder
 _appendFunctionToModuleBuilder label fn (mb@ModuleBuilder{..}) =
     mb {
-      moduleBuilderFunctions = M.insert label fn moduleBuilderFunctions
+      mbFunctions = M.insert label fn mbFunctions
     }
 
 -- | Given a function spec and a function name, create it in the modulebuilder.
 runFunctionBuilder :: [IRType] -> IRType -> String -> State FunctionBuilder () -> State ModuleBuilder FunctionLabel
 runFunctionBuilder ptys retty name fs = do
   -- generate a unique label
-  label <- gets (makeLabelUniqueKey_ (Label name) . moduleBuilderFunctions)
+  label <- gets (makeLabelUniqueKey_ (Label name) . mbFunctions)
   let fnbuilder = execState fs (_createFunctionBuilder ptys retty label)
   let fn = _createFunctionFromBuilder fnbuilder
   modify (_appendFunctionToModuleBuilder label fn)
@@ -194,11 +195,12 @@ runModuleBuilder s = let final = execState s _createModuleBuilder in
 
 -- | Create an IR.Module from a ModuleBuilder
 _createModuleFromBuilder :: ModuleBuilder -> Module
-_createModuleFromBuilder ModuleBuilder{..} = Module (M.elems moduleBuilderFunctions)
+_createModuleFromBuilder ModuleBuilder{..} = 
+  Module (M.elems mbFunctions) mbGlobals
 
 -- | Default module builder
 _createModuleBuilder ::  ModuleBuilder
-_createModuleBuilder = ModuleBuilder {moduleBuilderFunctions=mempty}
+_createModuleBuilder = ModuleBuilder {mbFunctions=mempty, mbGlobals=mempty}
 
 -- | Create an IR.function from a FunctionBuilder
 _createFunctionFromBuilder :: FunctionBuilder -> IR.Function
@@ -207,7 +209,7 @@ _createFunctionFromBuilder  FunctionBuilder{..} =
     functionBBMap=bbLabelToBB,
     functionEntryBBLabel=entryBBLabel,
     functionType=type',
-    functionLabel=functionBuilderFunctionLabel,
+    functionLabel=fbFunctionLabel,
     functionParamLabels=map _getParamName [0..(length paramLabelToParam)]
   }
 
