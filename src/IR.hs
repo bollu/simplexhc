@@ -28,7 +28,8 @@ instance Pretty (Label a) where
   pretty (Label s) = pretty s
 
 -- a Value, which can either be a constant, or a reference to an instruction.
-data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function)
+data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function) |
+             ValueGlobalRef (Label GlobalValue)
 
 -- a GlobalValue, that is a value of a global variable.
 data GlobalValue = GlobalValue { gvType :: IRType, gvValue :: Maybe Value }
@@ -42,9 +43,10 @@ instance Pretty Value where
   pretty (ValueInstRef name) = pretty "%" <> pretty name
   pretty (ValueParamRef name) = pretty "%param." <> pretty name
   pretty (ValueFnPointer name) = pretty "%fnptr." <> pretty name
+  pretty (ValueGlobalRef name) = pretty "@" <> pretty name
 
 -- | Instructions that we allow within a basic block.
-data Inst  where
+data Inst where
   InstAlloc :: Inst
   InstAdd :: Value -> Value -> Inst
   InstMul :: Value -> Value -> Inst
@@ -52,6 +54,7 @@ data Inst  where
   InstAnd :: Value -> Value -> Inst
   InstLoad :: Value -> Inst 
   InstStore :: Value -> Value -> Inst 
+  InstGEP :: Value -> [Value] -> Inst
   InstPhi :: NE.NonEmpty (BBLabel, Value) -> Inst
 
 instance Pretty Inst where
@@ -69,12 +72,6 @@ instance Pretty Inst where
 
 -- | Represents @a that is optionally named by a @Label a
 data Named a = Named { namedName :: Label a, namedData :: a }
-
-
--- | Infix operator for @Named constructor
-(=:=) :: Label a  -> a -> Named a
-name =:= a = Named name a
-
 
 instance Pretty a => Pretty (Named a) where
   pretty (Named name data') = pretty name <+> pretty ":=" <+> pretty data'

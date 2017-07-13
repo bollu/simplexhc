@@ -43,7 +43,11 @@ liftMapExtract_ f (OrderedMap map' _) = f map'
 -- | NOTE: this will maintain the order of insertion. Elements that are inserted
 -- | later are returned later in the `keys`, `elems`.
 insert  :: Ord k => k -> a -> OrderedMap k a -> OrderedMap k a
-insert k a OrderedMap{..} = OrderedMap (M.insert k a map') (order ++ [k])
+insert k a om@OrderedMap{..} = 
+  case (liftMapExtract_ (M.lookup k)) om of
+    Nothing -> OrderedMap (M.insert k a map') (order ++ [k])
+    -- If the key already exists, keep the old order
+    _ -> OrderedMap (M.insert k a map') (order)
 
 lookup :: Ord k => k -> OrderedMap k a -> Maybe a
 lookup k = liftMapExtract_ (M.lookup k)
