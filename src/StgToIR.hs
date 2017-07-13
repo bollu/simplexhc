@@ -149,9 +149,24 @@ createMatcher ctx = do
       setRetInst (RetInstSwitch param errBB  switchValAndBBs)
 
 
+-- | Generate code for an expression node in the IR
+codegenExprNode :: ExprNode -> State FunctionBuilder ()
+codegenExprNode e = return ()
+
+-- | Setup a binding with name VarName
+setupBinding_ :: Context -> VarName -> State FunctionBuilder ()
+setupBinding_ ctx name = do
+  let b = binding $ (bindingNameToData ctx) M.! name :: Binding
+  codegenExprNode (_lambdaExprNode . _bindingLambda $ b)
+
+
 programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
     let bs = getBindsInProgram p
     ctx <- createContext bs
     matcherfn <- createMatcher ctx
+    for_ (M.toList . bindingNameToData $ ctx)
+          (\(bname, bdata) -> runFunctionBuilder
+                                  (bindingFn bdata)
+                                  (setupBinding_ ctx bname))
     return ()
