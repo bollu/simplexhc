@@ -195,15 +195,15 @@ _mbAppendFunction label fn (mb@ModuleBuilder{..}) =
 
 -- | To create a function definition, first call `createFunction`.
 -- | Given a function label and a builder, create it in the `ModuleBuilder`.
-runFunctionBuilder :: Label Function -> State FunctionBuilder () -> State ModuleBuilder FunctionLabel
+runFunctionBuilder :: Label Function -> State FunctionBuilder () -> State ModuleBuilder ()
 runFunctionBuilder label fs = do
   -- Get the stub function that was created from createFunction
-  fn <- gets $ (M.! label) . mbFunctions
-  let (ptys, retty) = functionType fn
-  let fnbuilder = execState fs (_createFunctionBuilder ptys retty label)
-  let fn = _createFunctionFromBuilder fnbuilder
-  modify (\mb -> mb { mbFunctions=M.insert label fn (mbFunctions  mb)})
-  return label
+  origfn <- gets $ (M.! label) . mbFunctions
+  let (ptys, retty) = functionType origfn
+  let finalbuilder = execState fs (_createFunctionBuilder ptys retty label)
+
+  let fn = _createFunctionFromBuilder finalbuilder
+  modify (_mbAppendFunction label fn)
 
 -- | Create a new function . This is more fine grained that runFunctionBuilder.
 createFunction :: [IRType] -> IRType -> String -> State ModuleBuilder FunctionLabel
