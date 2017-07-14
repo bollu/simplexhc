@@ -157,10 +157,12 @@ liftBBEdit f fbuilder = fbuilder {
 name =:= inst = appendNamedInst_ $ Named (Label name) inst
 
 
-appendInst :: Inst -> State FunctionBuilder Value
-appendInst inst = do
-  name <- getTempInstName_
-  appendNamedInst_  (Named name inst)
+-- | Append an Instruction that is not named to the BB
+appendInst :: Inst -> State FunctionBuilder ()
+appendInst i = modify . liftBBEdit $ (appendInstToBB (UnNamed i))
+  where
+    appendInstToBB :: Named Inst -> BasicBlock -> BasicBlock
+    appendInstToBB i bb = bb { bbInsts=bbInsts bb ++ [i] }
 
 
 -- | Append instruction "I" to the FunctionBuilder

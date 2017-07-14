@@ -81,10 +81,11 @@ instance Pretty Inst where
       braces (hcat (punctuate comma (map pretty params)))
 
 -- | Represents @a that is optionally named by a @Label a
-data Named a = Named { namedName :: Label a, namedData :: a }
+data Named a = Named { namedName :: Label a, namedData :: a } | UnNamed { namedData :: a}
 
 instance Pretty a => Pretty (Named a) where
   pretty (Named name data') = pretty name <+> pretty ":=" <+> pretty data'
+  pretty (UnNamed data') = pretty data'
 
 
 -- | Used to identify basic blocks
