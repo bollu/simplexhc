@@ -48,7 +48,11 @@ data Context = Context {
     -- | function to push boxed value to stack
     fnpushboxed :: Value,
     -- | function to pop boxed value on stack
-    fnpopboxed :: Value
+    fnpopboxed :: Value,
+    -- | function to push a raw int to stack
+    fnpushint :: Value,
+    -- | function to pop an int from the stack
+    fnpopint :: Value
 }
 
 -- | ID of a binding
@@ -70,15 +74,17 @@ buildFnStubForBind Binding{..} = let
 
 
  -- | The type of a boxed value
-boxedType :: IRType
-boxedType = IRTypePointer (IRTypeFunction [] IRTypeVoid)
+typeBoxed :: IRType
+typeBoxed = IRTypePointer (IRTypeFunction [] IRTypeVoid)
 
+-- | Create a function that pushes values on the stack
 _createStackPushFn :: String ->  -- ^function name
+                      IRType -> -- ^type of stack elements
                       Value -> -- ^count global
                       Value -> -- ^stack pointer global
                       State ModuleBuilder Value
-_createStackPushFn fnname nG stackGP = do
-  lbl <- createFunction [boxedType] IRTypeVoid fnname
+_createStackPushFn fnname elemty nG stackGP = do
+  lbl <- createFunction [elemty] IRTypeVoid fnname
   runFunctionBuilder lbl $ do
       -- load the rawn value
       n <- "n" =:= InstLoad nG
@@ -95,12 +101,14 @@ _createStackPushFn fnname nG stackGP = do
   return lbl
 
 
-_createStackPopFn ::  String -> -- ^Function name
-                      Value -> -- ^count global
-                      Value -> -- ^stack pointer global
-                      State ModuleBuilder Value
-_createStackPopFn fnname nG stackGP = do
-  lbl <- createFunction [] boxedType fnname
+-- | Create a function that pops values off the stack
+_createStackPopFn :: String -> -- ^Function name
+                     IRType -> -- ^type of stack elements
+                     Value -> -- ^count global
+                     Value -> -- ^stack pointer global
+                     State ModuleBuilder Value
+_createStackPopFn fnname elemty nG stackGP = do
+  lbl <- createFunction [] elemty  fnname
   runFunctionBuilder lbl $ do
       -- load the rawn value
       n <- "n" =:= InstLoad nG
@@ -136,8 +144,11 @@ createContext bs = do
                   binding=b} | bival <- [1..] | fn <- bfns | b <- bs]
   let bnames = map (_bindingName . binding) bdatas
 
-  pushboxed <- _createStackPushFn "pushbox" boxn boxstack
-  popboxed <- _createStackPopFn "popbox" boxn boxstack
+  pushboxed <- _createStackPushFn "pushbox" typeBoxed boxn boxstack
+  popboxed <- _createStackPopFn "popbox" typeBoxed boxn boxstack
+
+  pushint <- _createStackPushFn "pushint" typeint32 boxn boxstack
+  popint <- _createStackPopFn "popint" typeint32 boxn boxstack
 
   return $ Context {
     rawstackGP=rawstack,
@@ -147,7 +158,9 @@ createContext bs = do
     bindingNameToData=M.fromList (zip bnames bdatas),
     fnmatcher=fnmatcher,
     fnpushboxed=pushboxed,
-    fnpopboxed=popboxed
+    fnpopboxed=popboxed,
+    fnpushint=pushint,
+    fnpopint=popint
  }
 
 -- | Push a function into the stack
@@ -157,13 +170,23 @@ pushBoxed ctx val = do
   appendInst $ InstCall f [val]
   return ()
 
-
 -- | Create the instruction to pop a function from the stack.
 -- | Note that return value needs to be named with (=:=)
 popBoxed :: Context -> Inst
 popBoxed ctx =
   let f = fnpopboxed ctx in InstCall f []
 
+-- | Push an int to the stack
+pushInt :: Context -> Value -> State FunctionBuilder ()
+pushInt ctx val = do
+  let f = fnpushint ctx
+  appendInst $ InstCall f [val]
+
+-- | Create the instruction to pop a function from the stack.
+-- | Note that return value needs to be named with (=:=)
+popInt :: Context -> Inst
+popInt ctx =
+  let f = fnpopint ctx in InstCall f []
 
 createMatcher :: Context -> State ModuleBuilder ()
 createMatcher ctx = do
@@ -190,7 +213,6 @@ createMatcher ctx = do
     buildMatcherFn_ bdata = do
       entrybb <- getEntryBBLabel
       let bnames = M.keys bdata
-      trace ("bnames: " ++ show bnames) (return ())
       switchValAndBBs <- for bnames (buildMatchBBForBind_ bdata)
       param <- getParamValue 0
       errBB <- createBB "switch.fail"
@@ -206,7 +228,7 @@ createMatcherCallWithName ctx bname = let
 
 -- | push an STG atom to the correct stack
 pushAtomToStack :: Context -> M.OrderedMap VarName Value -> Atom -> State FunctionBuilder ()
-pushAtomToStack ctx _ (AtomInt (StgInt i)) = error "push prim int is unimplemented" -- pushPrimIntToStack ctx (ValueConstInt i)
+pushAtomToStack ctx _ (AtomInt (StgInt i)) =  pushInt ctx (ValueConstInt i)
 pushAtomToStack ctx nametoval (AtomVarName v) = pushBoxed ctx (nametoval M.! v)
 
 
@@ -235,7 +257,8 @@ codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
 
   return ()
 
-codegenExprNode _ e _ _= error $ " Unimplemented codegen for exprnode: " ++ prettyToString e
+codegenExprNode _ _ _ e = error . docToString $
+  vcat [pretty " Unimplemented codegen for exprnode: ", indent 4 (pretty e)]
 
 -- | Setup a binding with name VarName
 setupBinding_ :: Context -> VarName -> State FunctionBuilder ()

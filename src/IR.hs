@@ -14,6 +14,10 @@ data IRType = IRTypeInt Int | -- ^ number of bits
               IRTypePointer IRType |
               IRTypeFunction [IRType] IRType
 
+-- | The type of a 32 bit integer. Handy alias to have.
+typeint32 :: IRType
+typeint32 = IRTypeInt 32
+
 instance Pretty IRType where
   pretty (IRTypeInt i) = pretty "int" <+> pretty i
   pretty IRTypeVoid = pretty "void"
