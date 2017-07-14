@@ -11,8 +11,7 @@ module IRBuilder(
   -- getTempRetInstName_,
   appendInst,
   (=:=),
-  setRetInst,
-  getParamValue,
+  setRetInst, getParamValue,
   runFunctionBuilder,
   createFunction, -- NOT STABILISED
   runModuleBuilder,
@@ -43,12 +42,12 @@ makeKeyUnique_ f m k =  unique_ f m 0 k where
 
 appendLabelWithId_ :: Label a -> Int -> Label a
 appendLabelWithId_ (Label l) i = if i == 0
-                                 then Label l 
+                                 then Label l
                                  else Label (l ++ "." ++ show i)
 
 makeLabelUniqueKey_ :: String -> M.OrderedMap (Label a) v -> Label a
-makeLabelUniqueKey_ l m = 
-  makeKeyUnique_ appendLabelWithId_ m (Label l) 
+makeLabelUniqueKey_ l m =
+  makeKeyUnique_ appendLabelWithId_ m (Label l)
 
 data FunctionBuilder = FunctionBuilder {
   -- | The first BB that is present in the module
@@ -129,7 +128,7 @@ getTempInstName_ :: State FunctionBuilder (Label Inst)
 getTempInstName_ = do
   n <- gets tmpInstNamesCounter
   modify (\b -> b { tmpInstNamesCounter=n+1 })
-  return . Label $ "tmp." ++ show n
+  return . Label $ "_." ++ show n
 
 
 {-
@@ -155,7 +154,7 @@ liftBBEdit f fbuilder = fbuilder {
 
 -- Append inst I with name to the functionBuilder
 (=:=) :: String -> Inst -> State FunctionBuilder Value
-name =:= inst = appendNamedInst_ $ Named (Label name) inst 
+name =:= inst = appendNamedInst_ $ Named (Label name) inst
 
 
 appendInst :: Inst -> State FunctionBuilder Value
@@ -206,7 +205,7 @@ runFunctionBuilder (ValueFnPointer label) fs = do
   let fn = _createFunctionFromBuilder finalbuilder
   modify (_mbAppendFunction label fn)
 
-runFunctionBuilder v _ = 
+runFunctionBuilder v _ =
   error $ "called runFunctionBuilder, provided non-function value: " ++
             prettyToString v
 
@@ -228,7 +227,7 @@ runModuleBuilder s = let final = execState s _createModuleBuilder in
 
 -- | Create an IR.Module from a ModuleBuilder
 _createModuleFromBuilder :: ModuleBuilder -> Module
-_createModuleFromBuilder ModuleBuilder{..} = 
+_createModuleFromBuilder ModuleBuilder{..} =
   Module (M.elems mbFunctions) mbGlobals
 
 -- | Default module builder

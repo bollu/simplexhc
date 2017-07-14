@@ -4,7 +4,6 @@ module StgToIR where
 import StgLanguage
 import ColorUtils
 
-
 import Debug.Trace
 import IR
 import IRBuilder
@@ -37,15 +36,19 @@ data Context = Context {
     -- | Stack pointer to raw values.
     rawstackGP:: Value,
     -- | Stack pointer to function values.
-    fnstackGP:: Value,
+    boxstackGP:: Value,
     -- | Number of raw values on the stack.
     rawnG  :: Value,
     -- | Number of function values on the stack.
-    fnstacknG :: Value,
+    boxstacknG :: Value,
     -- | Binding name to binding data
     bindingNameToData :: M.OrderedMap VarName BindingData,
     -- | Matcher function
-    matcherfn :: Value
+    fnmatcher :: Value,
+    -- | function to push boxed value to stack
+    fnpushboxed :: Value,
+    -- | function to pop boxed value on stack
+    fnpopboxed :: Value
 }
 
 -- | ID of a binding
@@ -65,6 +68,55 @@ buildFnStubForBind Binding{..} = let
     createFunction paramsty retty fnname
 
 
+
+ -- | The type of a boxed value
+boxedType :: IRType
+boxedType = IRTypePointer (IRTypeFunction [] IRTypeVoid)
+
+_createStackPushFn :: String ->  -- ^function name
+                      Value -> -- ^count global
+                      Value -> -- ^stack pointer global
+                      State ModuleBuilder Value
+_createStackPushFn fnname nG stackGP = do
+  lbl <- createFunction [boxedType] IRTypeVoid fnname
+  runFunctionBuilder lbl $ do
+      -- load the rawn value
+      n <- "n" =:= InstLoad nG
+      -- Load the pointer
+      stackP <- "stackp" =:= InstLoad stackGP
+      -- compute store addr
+      storeaddr <- "storeaddr" =:= InstGEP stackP [n]
+      val <- getParamValue 0
+      appendInst $ InstStore storeaddr val
+      -- TODO: this should be (n + 1)
+      ninc <- "ninc" =:= InstAdd n (ValueConstInt 1)
+      appendInst $ InstStore nG ninc
+      return ()
+  return lbl
+
+
+_createStackPopFn ::  String -> -- ^Function name
+                      Value -> -- ^count global
+                      Value -> -- ^stack pointer global
+                      State ModuleBuilder Value
+_createStackPopFn fnname nG stackGP = do
+  lbl <- createFunction [] boxedType fnname
+  runFunctionBuilder lbl $ do
+      -- load the rawn value
+      n <- "n" =:= InstLoad nG
+      -- Load the pointer
+      stackP <- "stackp" =:= InstLoad stackGP
+      -- compute store addr
+      loadaddr <- "loadaddr" =:= InstGEP stackP [n]
+      loadval <-  "loadval" =:= InstLoad loadaddr
+
+      n' <- "ndec" =:= InstAdd n (ValueConstInt (-1))
+      appendInst $ InstStore nG n'
+      setRetInst $  RetInstReturn loadval
+      return ()
+  return lbl
+
+
 -- | Create the `Context` object that is contains data needed to build all of the
 -- | LLVM Module for our program.
 createContext :: [Binding] -> State ModuleBuilder Context
@@ -73,10 +125,10 @@ createContext bs = do
   boxstack <- createGlobalVariable "stackfn" (IRTypePointer (IRTypeFunction [] IRTypeVoid))
   rawn <- createGlobalVariable "rawn" (IRTypeInt 32)
   boxn <- createGlobalVariable "fnn" (IRTypeInt 32)
-  bfns <- for bs buildFnStubForBind 
+  bfns <- for bs buildFnStubForBind
 
   let matcherretty = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
-  matcherfn <- createFunction [] matcherretty "matcher"
+  fnmatcher <- createFunction [] matcherretty "matcher"
 
   let bdatas = [BindingData {
                   bindingIntVal=bival,
@@ -84,61 +136,40 @@ createContext bs = do
                   binding=b} | bival <- [1..] | fn <- bfns | b <- bs]
   let bnames = map (_bindingName . binding) bdatas
 
+  pushboxed <- _createStackPushFn "pushbox" boxn boxstack
+  popboxed <- _createStackPopFn "popbox" boxn boxstack
+
   return $ Context {
     rawstackGP=rawstack,
-    fnstackGP=boxstack,
+    boxstackGP=boxstack,
     rawnG=rawn,
-    fnstacknG=boxn,
+    boxstacknG=boxn,
     bindingNameToData=M.fromList (zip bnames bdatas),
-    matcherfn=matcherfn
+    fnmatcher=fnmatcher,
+    fnpushboxed=pushboxed,
+    fnpopboxed=popboxed
  }
 
-
--- | Push a primitive integer into the stack.
-pushPrimIntToStack :: Context -> Value -> State FunctionBuilder ()
-pushPrimIntToStack ctx val = do
-  -- load the rawn value
-  rawn <- "rawn.val" =:= InstLoad (rawnG ctx)
-  -- Load the pointer
-  rawstackP <- "raw.val" =:= InstLoad (rawstackGP ctx)
-  -- compute store addr
-  storeaddr <- "storeaddr" =:= InstGEP rawstackP [rawn]
-  appendInst $ InstStore storeaddr val
-  return ()
-
 -- | Push a function into the stack
-pushFnToStack :: Context -> Value -> State FunctionBuilder ()
-pushFnToStack ctx val = do
-  -- load the rawn value
-  rawn <- "rawn.val" =:= InstLoad (rawnG ctx)
-  -- Load the pointer
-  rawstackP <- "raw.val" =:= InstLoad (rawstackGP ctx)
-  -- compute store addr
-  storeaddr <- "storeaddr" =:= InstGEP rawstackP [rawn]
-  appendInst $ InstStore storeaddr val
+pushBoxed :: Context -> Value -> State FunctionBuilder ()
+pushBoxed ctx val = do
+  let f = fnpushboxed ctx
+  appendInst $ InstCall f [val]
   return ()
 
 
--- | Pop a function from the stack
-popFnFromStack :: Context -> State FunctionBuilder Value
-popFnFromStack ctx = do
-  -- load the rawn value
-  rawn <- "rawn.val" =:= InstLoad (rawnG ctx)
-  -- Load the pointer
-  rawstackP <- "raw.val" =:= InstLoad (rawstackGP ctx)
-  -- compute store addr
-  addr <- "loadaddr" =:= InstGEP rawstackP [rawn]
-  val <- "val" =:= InstLoad addr
-  return val
-
-
+-- | Create the instruction to pop a function from the stack.
+-- | Note that return value needs to be named with (=:=)
+popBoxed :: Context -> Inst
+popBoxed ctx =
+  let f = fnpopboxed ctx in InstCall f []
 
 
 createMatcher :: Context -> State ModuleBuilder ()
 createMatcher ctx = do
-    runFunctionBuilder (matcherfn ctx) (buildMatcherFn_ (bindingNameToData ctx))
+    runFunctionBuilder (fnmatcher ctx) (buildMatcherFn_ (bindingNameToData ctx))
     where
-    -- | Build a BB of the matcher that mathes with the ID and returns the 
+    -- | Build a BB of the matcher that mathes with the ID and returns the
     -- | actual function.
     -- | Return the IR::Value of the switch case needed, and the label of the BB
     -- | to jump to.
@@ -168,22 +199,22 @@ createMatcher ctx = do
 
 -- | Create a call to the matcher to return the function with name VarName
 createMatcherCallWithName :: Context -> VarName -> Inst
-createMatcherCallWithName ctx bname = let 
+createMatcherCallWithName ctx bname = let
   bintval = bindingIntVal $ (bindingNameToData ctx) M.! bname
-  in InstCall (matcherfn ctx) [(ValueConstInt bintval)]
-  
+  in InstCall (fnmatcher ctx) [(ValueConstInt bintval)]
+
 
 -- | push an STG atom to the correct stack
 pushAtomToStack :: Context -> M.OrderedMap VarName Value -> Atom -> State FunctionBuilder ()
-pushAtomToStack ctx _ (AtomInt (StgInt i)) = pushPrimIntToStack ctx (ValueConstInt i)
-pushAtomToStack ctx nametoval (AtomVarName v) = pushFnToStack ctx (nametoval M.! v)
+pushAtomToStack ctx _ (AtomInt (StgInt i)) = error "push prim int is unimplemented" -- pushPrimIntToStack ctx (ValueConstInt i)
+pushAtomToStack ctx nametoval (AtomVarName v) = pushBoxed ctx (nametoval M.! v)
 
 
 -- | Generate code for an expression node in the IR
 codegenExprNode :: Context ->
                   [VarName] -> -- ^free variables
                   [VarName] -> -- ^bound variables
-                  ExprNode -> -- ^expression node 
+                  ExprNode -> -- ^expression node
                   State FunctionBuilder ()
 codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
   -- if bound = A B C, stack will have
@@ -191,7 +222,7 @@ codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
   -- B
   -- A
   -- So we need to reverse the stack
-  boundvals <- reverse <$> replicateM (length bound) (popFnFromStack ctx)
+  boundvals <-  for (reverse bound) (\b -> (_unVarName b) =:= (popBoxed ctx))
   let boundNameToVal = M.fromList $ zip bound boundvals :: M.OrderedMap VarName Value
   let toplevelNameToVal = fmap bindingFn (bindingNameToData ctx) :: M.OrderedMap VarName Value
 
@@ -200,6 +231,7 @@ codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
           Nothing -> -- actually we should check globals, but fuck it for now
                      "fn" =:= createMatcherCallWithName ctx fnname
   for atoms (pushAtomToStack ctx (boundNameToVal `M.union` toplevelNameToVal))
+  appendInst $ InstCall fn []
 
   return ()
 

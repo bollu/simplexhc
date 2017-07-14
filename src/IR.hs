@@ -9,7 +9,7 @@ import qualified OrderedMap as M
 data Param
 
 -- | Types that IR values can have
-data IRType = IRTypeInt Int | -- ^ number of bits 
+data IRType = IRTypeInt Int | -- ^ number of bits
               IRTypeVoid |
               IRTypePointer IRType |
               IRTypeFunction [IRType] IRType
@@ -18,7 +18,7 @@ instance Pretty IRType where
   pretty (IRTypeInt i) = pretty "int" <+> pretty i
   pretty IRTypeVoid = pretty "void"
   pretty (IRTypePointer ty) = hcat [parens (pretty ty), pretty "^"]
-  pretty (IRTypeFunction params ret) = 
+  pretty (IRTypeFunction params ret) =
     parens (hcat . punctuate comma $ pparams) <+> pretty "->" <+> pretty ret where
       pparams = map pretty params
 
@@ -52,8 +52,8 @@ data Inst where
   InstMul :: Value -> Value -> Inst
   InstL :: Value -> Value -> Inst
   InstAnd :: Value -> Value -> Inst
-  InstLoad :: Value -> Inst 
-  InstStore :: Value -> Value -> Inst 
+  InstLoad :: Value -> Inst
+  InstStore :: Value -> Value -> Inst
   InstGEP :: Value -> [Value] -> Inst
   InstPhi :: NE.NonEmpty (BBLabel, Value) -> Inst
   InstCall :: Value -> [Value] -> Inst
@@ -65,18 +65,18 @@ instance Pretty Inst where
   pretty (InstL l r) = pretty "lessthan" <+> pretty l <+> pretty r
   pretty (InstAnd l r) = pretty "and" <+> pretty l <+> pretty r
   pretty (InstLoad op) = pretty "load" <+> pretty op
-  pretty (InstGEP base offsets) = 
+  pretty (InstGEP base offsets) =
     pretty "gep" <+>
     braces(pretty "base:" <+> pretty base) <+>
     hcat (map (brackets . pretty) offsets)
-      
+
   pretty (InstStore slot val) = pretty "store" <+> pretty val <+>
                                 pretty "in" <+> pretty slot
-  pretty (InstPhi philist) = 
+  pretty (InstPhi philist) =
     hcat (punctuate comma (NE.toList (fmap (\(bbid, val) ->
                                 parens (pretty bbid <+> pretty val)) philist)))
 
-  pretty (InstCall fn params) = 
+  pretty (InstCall fn params) =
     pretty "call" <+> pretty fn <+>
       braces (hcat (punctuate comma (map pretty params)))
 
@@ -95,11 +95,11 @@ data BasicBlock = BasicBlock { bbInsts :: [Named Inst], bbRetInst :: RetInst , b
 
 -- | Default basic block.
 defaultBB :: BasicBlock
-defaultBB = BasicBlock [] (RetInstUndefined) (Label "bbundefined")
+defaultBB = BasicBlock [] (RetInstVoid) (Label "bbundefined")
 
 -- TODO: replace nest with indent
 instance Pretty BasicBlock where
-  pretty (BasicBlock insts ret label) = 
+  pretty (BasicBlock insts ret label) =
     nest 4 (vsep ([pretty label <> pretty ":"] ++ body)) where
       body = map pretty insts ++ [pretty ret]
 
@@ -114,11 +114,11 @@ data RetInst =
     switchDefaultBB :: BBLabel,
     switchBBs :: [(Value, BBLabel)]
   } |
-  RetInstReturn Value | 
-  RetInstUndefined
+  RetInstReturn Value |
+  RetInstVoid
 
 instance Pretty RetInst where
-  pretty (RetInstUndefined) = pretty "RET UNDEFINED"
+  pretty (RetInstVoid) = pretty "ret void"
   pretty (RetInstBranch next) = pretty "branch" <+> pretty next
   pretty (RetInstConditionalBranch cond then' else') = pretty "branch if" <+> pretty cond <+> pretty "then" <+> pretty then' <+> pretty "else" <+> pretty else'
   pretty (RetInstSwitch val default' switches ) =
@@ -176,9 +176,9 @@ instance Pretty Module where
   pretty (Module funcs globals) = let
     mkGlobalPretty :: (GlobalLabel, GlobalValue) -> Doc a
     -- TODO: make GlobalLabel a newtype.
-    mkGlobalPretty (lbl, GlobalValue{..}) = 
+    mkGlobalPretty (lbl, GlobalValue{..}) =
        mkName lbl <+> colon <+> pretty gvType <+> mkRhs gvValue
-    -- | Pretty name for the label 
+    -- | Pretty name for the label
     mkName :: GlobalLabel -> Doc a
     mkName name = hcat [pretty "@", pretty name]
     -- | Pretty RHS
