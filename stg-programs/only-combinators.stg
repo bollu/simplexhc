@@ -1,0 +1,3 @@
+define k = {} \n {x, y} -> x {};
+define main =  {} \n {} -> k {k, k};
+                          

@@ -56,6 +56,7 @@ data Inst where
   InstStore :: Value -> Value -> Inst 
   InstGEP :: Value -> [Value] -> Inst
   InstPhi :: NE.NonEmpty (BBLabel, Value) -> Inst
+  InstCall :: Value -> [Value] -> Inst
 
 instance Pretty Inst where
   pretty (InstAlloc) = pretty "alloc"
@@ -64,11 +65,20 @@ instance Pretty Inst where
   pretty (InstL l r) = pretty "lessthan" <+> pretty l <+> pretty r
   pretty (InstAnd l r) = pretty "and" <+> pretty l <+> pretty r
   pretty (InstLoad op) = pretty "load" <+> pretty op
+  pretty (InstGEP base offsets) = 
+    pretty "gep" <+>
+    braces(pretty "base:" <+> pretty base) <+>
+    hcat (map (brackets . pretty) offsets)
+      
   pretty (InstStore slot val) = pretty "store" <+> pretty val <+>
                                 pretty "in" <+> pretty slot
   pretty (InstPhi philist) = 
     hcat (punctuate comma (NE.toList (fmap (\(bbid, val) ->
                                 parens (pretty bbid <+> pretty val)) philist)))
+
+  pretty (InstCall fn params) = 
+    pretty "call" <+> pretty fn <+>
+      braces (hcat (punctuate comma (map pretty params)))
 
 -- | Represents @a that is optionally named by a @Label a
 data Named a = Named { namedName :: Label a, namedData :: a }

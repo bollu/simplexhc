@@ -14,6 +14,7 @@ import Data.Foldable
 import Control.Monad.State.Strict
 import Data.Text.Prettyprint.Doc as PP
 import qualified OrderedMap as M
+import qualified Data.List as L
 
 -- | Int value corresponding to binding
 type BindingIntVal = Int
@@ -21,14 +22,15 @@ type BindingIntVal = Int
 data BindingData = BindingData {
   binding :: Binding,
   bindingIntVal :: BindingIntVal,
-  bindingFn :: FunctionLabel
+  bindingFn :: Value
 }
 
 instance Pretty BindingData where
   pretty BindingData{..}=
-    vcat $ [pretty binding,
-            pretty "id := " <+> pretty bindingIntVal,
-            pretty bindingFn]
+    vcat [pretty "BindingData {",
+      indent 4 (vcat $ [pretty "binding :=" <+> pretty binding,
+                      pretty "id := " <+> pretty bindingIntVal,
+                      pretty "bindingFn :=" <+> pretty bindingFn]), pretty "}"]
 
 -- | G = global, P = pointer. General Context that we need throughout.
 data Context = Context {
@@ -41,7 +43,9 @@ data Context = Context {
     -- | Number of function values on the stack.
     fnstacknG :: Value,
     -- | Binding name to binding data
-    bindingNameToData :: M.OrderedMap VarName BindingData
+    bindingNameToData :: M.OrderedMap VarName BindingData,
+    -- | Matcher function
+    matcherfn :: Value
 }
 
 -- | ID of a binding
@@ -52,7 +56,7 @@ getBindsInProgram prog = prog >>= collectBindingsInBinding
 -- | Build the function stubs that corresponds to the binding.
 -- | We first build all the stubs to populate the Context. Then, we can build
 -- | the indivisual bindings.
-buildFnStubForBind :: Binding -> State ModuleBuilder FunctionLabel
+buildFnStubForBind :: Binding -> State ModuleBuilder Value
 buildFnStubForBind Binding{..} = let
     paramsty = []
     retty = IRTypeVoid
@@ -71,6 +75,9 @@ createContext bs = do
   boxn <- createGlobalVariable "fnn" (IRTypeInt 32)
   bfns <- for bs buildFnStubForBind 
 
+  let matcherretty = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
+  matcherfn <- createFunction [] matcherretty "matcher"
+
   let bdatas = [BindingData {
                   bindingIntVal=bival,
                   bindingFn=fn,
@@ -82,10 +89,12 @@ createContext bs = do
     fnstackGP=boxstack,
     rawnG=rawn,
     fnstacknG=boxn,
-    bindingNameToData=M.fromList (zip bnames bdatas)
+    bindingNameToData=M.fromList (zip bnames bdatas),
+    matcherfn=matcherfn
  }
 
 
+-- | Push a primitive integer into the stack.
 pushPrimIntToStack :: Context -> Value -> State FunctionBuilder ()
 pushPrimIntToStack ctx val = do
   -- load the rawn value
@@ -97,6 +106,7 @@ pushPrimIntToStack ctx val = do
   appendInst $ InstStore storeaddr val
   return ()
 
+-- | Push a function into the stack
 pushFnToStack :: Context -> Value -> State FunctionBuilder ()
 pushFnToStack ctx val = do
   -- load the rawn value
@@ -109,16 +119,24 @@ pushFnToStack ctx val = do
   return ()
 
 
+-- | Pop a function from the stack
+popFnFromStack :: Context -> State FunctionBuilder Value
+popFnFromStack ctx = do
+  -- load the rawn value
+  rawn <- "rawn.val" =:= InstLoad (rawnG ctx)
+  -- Load the pointer
+  rawstackP <- "raw.val" =:= InstLoad (rawstackGP ctx)
+  -- compute store addr
+  addr <- "loadaddr" =:= InstGEP rawstackP [rawn]
+  val <- "val" =:= InstLoad addr
+  return val
 
 
 
-createMatcher :: Context -> State ModuleBuilder FunctionLabel
+
+createMatcher :: Context -> State ModuleBuilder ()
 createMatcher ctx = do
-    -- (() -> Void)^
-    let retty = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
-    matcher <- createFunction [IRTypeInt 32] retty "matcher"
-    runFunctionBuilder matcher (buildMatcherFn_ (bindingNameToData ctx))
-    return matcher
+    runFunctionBuilder (matcherfn ctx) (buildMatcherFn_ (bindingNameToData ctx))
     where
     -- | Build a BB of the matcher that mathes with the ID and returns the 
     -- | actual function.
@@ -128,7 +146,7 @@ createMatcher ctx = do
     buildMatchBBForBind_ bdata bname = do
       bbid <- createBB  ("switch." ++ (_unVarName bname))
       focusBB bbid
-      let bfn = bindingFn (bdata M.! bname) :: FunctionLabel
+      let bfn = bindingFn (bdata M.! bname) :: Value
       let bintval = bindingIntVal (bdata M.! bname) :: BindingIntVal
 
       -- setRetInst (RetInstReturn (ValueFnPointer bfn))
@@ -148,23 +166,60 @@ createMatcher ctx = do
       focusBB entrybb
       setRetInst (RetInstSwitch param errBB  switchValAndBBs)
 
+-- | Create a call to the matcher to return the function with name VarName
+createMatcherCallWithName :: Context -> VarName -> Inst
+createMatcherCallWithName ctx bname = let 
+  bintval = bindingIntVal $ (bindingNameToData ctx) M.! bname
+  in InstCall (matcherfn ctx) [(ValueConstInt bintval)]
+  
+
+-- | push an STG atom to the correct stack
+pushAtomToStack :: Context -> M.OrderedMap VarName Value -> Atom -> State FunctionBuilder ()
+pushAtomToStack ctx _ (AtomInt (StgInt i)) = pushPrimIntToStack ctx (ValueConstInt i)
+pushAtomToStack ctx nametoval (AtomVarName v) = pushFnToStack ctx (nametoval M.! v)
+
 
 -- | Generate code for an expression node in the IR
-codegenExprNode :: ExprNode -> State FunctionBuilder ()
-codegenExprNode e = return ()
+codegenExprNode :: Context ->
+                  [VarName] -> -- ^free variables
+                  [VarName] -> -- ^bound variables
+                  ExprNode -> -- ^expression node 
+                  State FunctionBuilder ()
+codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
+  -- if bound = A B C, stack will have
+  -- C
+  -- B
+  -- A
+  -- So we need to reverse the stack
+  boundvals <- reverse <$> replicateM (length bound) (popFnFromStack ctx)
+  let boundNameToVal = M.fromList $ zip bound boundvals :: M.OrderedMap VarName Value
+  let toplevelNameToVal = fmap bindingFn (bindingNameToData ctx) :: M.OrderedMap VarName Value
+
+  fn <- case fnname `L.elemIndex` bound of
+          Just idx -> return $ boundvals L.!! idx
+          Nothing -> -- actually we should check globals, but fuck it for now
+                     "fn" =:= createMatcherCallWithName ctx fnname
+  for atoms (pushAtomToStack ctx (boundNameToVal `M.union` toplevelNameToVal))
+
+  return ()
+
+codegenExprNode _ e _ _= error $ " Unimplemented codegen for exprnode: " ++ prettyToString e
 
 -- | Setup a binding with name VarName
 setupBinding_ :: Context -> VarName -> State FunctionBuilder ()
 setupBinding_ ctx name = do
   let b = binding $ (bindingNameToData ctx) M.! name :: Binding
-  codegenExprNode (_lambdaExprNode . _bindingLambda $ b)
+  let Lambda{_lambdaFreeVarIdentifiers=free,
+             _lambdaBoundVarIdentifiers=bound,
+             _lambdaExprNode=e} = _bindingLambda b
+  codegenExprNode ctx free bound e
 
 
 programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
     let bs = getBindsInProgram p
     ctx <- createContext bs
-    matcherfn <- createMatcher ctx
+    createMatcher ctx
     for_ (M.toList . bindingNameToData $ ctx)
           (\(bname, bdata) -> runFunctionBuilder
                                   (bindingFn bdata)

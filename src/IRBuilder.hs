@@ -26,6 +26,7 @@ import Data.Foldable
 import Control.Monad.State.Strict
 import Control.Exception (assert)
 import Data.Foldable (length)
+import ColorUtils
 
 type Literal = String
 
@@ -195,8 +196,8 @@ _mbAppendFunction label fn (mb@ModuleBuilder{..}) =
 
 -- | To create a function definition, first call `createFunction`.
 -- | Given a function label and a builder, create it in the `ModuleBuilder`.
-runFunctionBuilder :: Label Function -> State FunctionBuilder () -> State ModuleBuilder ()
-runFunctionBuilder label fs = do
+runFunctionBuilder :: Value -> State FunctionBuilder () -> State ModuleBuilder ()
+runFunctionBuilder (ValueFnPointer label) fs = do
   -- Get the stub function that was created from createFunction
   origfn <- gets $ (M.! label) . mbFunctions
   let (ptys, retty) = functionType origfn
@@ -205,13 +206,17 @@ runFunctionBuilder label fs = do
   let fn = _createFunctionFromBuilder finalbuilder
   modify (_mbAppendFunction label fn)
 
+runFunctionBuilder v _ = 
+  error $ "called runFunctionBuilder, provided non-function value: " ++
+            prettyToString v
+
 -- | Create a new function . This is more fine grained that runFunctionBuilder.
-createFunction :: [IRType] -> IRType -> String -> State ModuleBuilder FunctionLabel
+createFunction :: [IRType] -> IRType -> String -> State ModuleBuilder Value
 createFunction ptys retty name = do
   label <- gets (makeLabelUniqueKey_ name . mbFunctions)
   let defaultfn = _createFunctionFromBuilder (_createFunctionBuilder ptys retty label)
   modify (_mbAppendFunction label defaultfn)
-  return label
+  return $ ValueFnPointer label
 
 
 

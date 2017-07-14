@@ -12,11 +12,13 @@ module OrderedMap(OrderedMap,
   toList,
   keys,
   (!),
+  union,
   OrderedMap.lookup) where
 import qualified Data.Map.Strict as M
 import Data.Monoid
 import ColorUtils
 import Data.Text.Prettyprint.Doc 
+import qualified Data.List as L
 
 -- At some point, I need this. This is more convenient than overloading the key to store the insertion time.
 -- | A dictionary that orders elements by insertion time
@@ -25,7 +27,7 @@ data OrderedMap k v = OrderedMap { map' :: M.Map k v, order :: [k] } deriving(Sh
 instance (Ord k, Pretty k, Pretty v) => Pretty (OrderedMap k v) where
   pretty ok = vcat (map pkv (toList ok)) where
     pkv :: (Pretty k, Pretty v) => (k, v) -> Doc ann
-    pkv (k, v) = pretty k <+> pretty ":" <+> pretty v
+    pkv (k, v) = pretty "** key: " <+> pretty k <+> pretty " | value : " <+> pretty v
 
 instance Ord k => Monoid (OrderedMap k v) where
   mempty :: OrderedMap k v
@@ -64,6 +66,10 @@ keys (OrderedMap{order=order}) = order
 elems :: Ord k => OrderedMap k a -> [a]
 elems (OrderedMap{order=order, map'=map'}) = map (map' M.!) order
 
+union :: (Eq k, Ord k) => OrderedMap k a -> OrderedMap k a -> OrderedMap k a
+union (OrderedMap{order=o1, map'=m1}) (OrderedMap{order=o2, map'=m2}) = 
+  OrderedMap{map'=m1 `M.union` m2, order=L.nub(o1++o2)}
+
 -- | Return the list of key value pairs in the order of insertion.
 toList :: (Ord k, Pretty k, Pretty a) => OrderedMap k a -> [(k, a)]
 toList omap = map (\k -> (k, omap OrderedMap.! k)) (keys omap)
@@ -76,4 +82,6 @@ ok ! k =
   case (OrderedMap.lookup k ok) of
            Just a -> a
            Nothing -> error . docToString $ 
-               vcat [pretty "key: " <+> pretty k, indent 4 (pretty ok)]
+               vcat [pretty "key missing, has no value associated with it: " <+> pretty k, indent 4 (pretty ok)]
+
+
