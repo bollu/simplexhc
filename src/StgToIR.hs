@@ -238,6 +238,7 @@ codegenExprNode :: Context ->
                   [VarName] -> -- ^bound variables
                   ExprNode -> -- ^expression node
                   State FunctionBuilder ()
+-- | Function appplication codegen
 codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
   -- if bound = A B C, stack will have
   -- C
@@ -256,6 +257,24 @@ codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
   appendInst $ InstCall fn []
 
   return ()
+
+-- | Constructor codegen
+codegenExprNode ctx free bound (ExprNodeConstructor (Constructor name atoms)) = do
+    -- if bound = A B C, stack will have
+    -- C
+    -- B
+    -- A
+    -- So we need to reverse the stack
+    boundvals <-  for (reverse bound) (\b -> (_unVarName b) =:= (popBoxed ctx))
+    let boundNameToVal = M.fromList $ zip bound boundvals :: M.OrderedMap VarName Value
+    let toplevelNameToVal = fmap bindingFn (bindingNameToData ctx) :: M.OrderedMap VarName Value
+    error "working on this"
+    return ()
+
+
+
+
+
 
 codegenExprNode _ _ _ e = error . docToString $
   vcat [pretty " Unimplemented codegen for exprnode: ", indent 4 (pretty e)]

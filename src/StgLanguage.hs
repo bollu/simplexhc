@@ -63,7 +63,7 @@ collectBindingsInExpr (ExprNodeBinop l _ r) = collectBindingsInExpr l ++ collect
 collectBindingsInExpr (ExprNodeFnApplication _ _) = []
 collectBindingsInExpr (ExprNodeConstructor _) = []
 collectBindingsInExpr (ExprNodeLet _ bindings expr) = (bindings >>= collectBindingsInBinding) ++ collectBindingsInExpr expr
-collectBindingsInExpr (ExprNodeCase case' alts) = collectBindingsInExpr case' 
+collectBindingsInExpr (ExprNodeCase case' alts) = collectBindingsInExpr case'
 collectBindingsInExpr (ExprNodeInt _ ) = []
 
 collectBindingsInBinding :: Binding -> [Binding]
@@ -99,7 +99,7 @@ data ExprNode = ExprNodeBinop !ExprNode !BinaryOperator !ExprNode |
                ExprNodeLet !IsLetRecursive ![Binding] !ExprNode |
                ExprNodeCase !ExprNode ![CaseAltType] |
                ExprNodeInt !StgInt
-      
+
 
 
 data CaseAlt lhs = CaseAlt {
@@ -119,7 +119,7 @@ instance Pretty lhs => Show (CaseAlt lhs) where
 data ConstructorPatternMatch = ConstructorPatternMatch ConstructorName [VarName] deriving(Eq)
 
 instance Pretty ConstructorPatternMatch where
-  pretty (ConstructorPatternMatch consName vars) = 
+  pretty (ConstructorPatternMatch consName vars) =
       pretty consName <+> (fmap pretty vars & punctuate comma & hsep & braces)
 
 data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
@@ -127,15 +127,15 @@ data CaseAltType = -- | match with a constructor: ConstructorName bindNames*
                       -- | match with a number: 10 -> e
                       CaseAltInt !(CaseAlt StgInt) |
                       -- | match with a variable: x -> e
-                      CaseAltVariable !(CaseAlt VarName) 
+                      CaseAltVariable !(CaseAlt VarName)
 
 
 
 instance Pretty CaseAltType where
-  pretty (CaseAltConstructor a) = 
+  pretty (CaseAltConstructor a) =
     pretty (_caseAltLHS a) <+>
     pretty "->"  <+>
-    pretty (_caseAltRHS a) 
+    pretty (_caseAltRHS a)
 
   pretty (CaseAltInt a) = pretty a
   pretty (CaseAltVariable a) = pretty a
@@ -148,12 +148,12 @@ data Lambda = Lambda {
     _lambdaFreeVarIdentifiers :: ![VarName],
     _lambdaBoundVarIdentifiers :: ![VarName],
     _lambdaExprNode :: !ExprNode
-} 
+}
 
 
 
 instance Pretty Lambda where
-    pretty (Lambda{..}) = 
+    pretty (Lambda{..}) =
         freedoc <+> updatedoc <+>
         bounddoc <+> pretty "->" <+>
         (pretty _lambdaExprNode) where
@@ -183,7 +183,7 @@ instance Pretty ExprNode where
     pretty (ExprNodeBinop eleft tok eright) = (pretty tok)  <+>
                                              (pretty eleft) <+>
                                              (pretty eright)
-    pretty (ExprNodeLet isrecursive bindings expr) = 
+    pretty (ExprNodeLet isrecursive bindings expr) =
           letname <+>
           vcat [bindingsstr,
                 (pretty "in"),
@@ -203,7 +203,7 @@ instance Show ExprNode where
 
 
 instance Pretty Binding where
-    pretty (Binding{..}) = 
+    pretty (Binding{..}) =
                          (pretty _bindingName) <+> equals <+>
                          (_bindingLambda & pretty)
 

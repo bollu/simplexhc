@@ -12,7 +12,8 @@ data Param
 data IRType = IRTypeInt Int | -- ^ number of bits
               IRTypeVoid |
               IRTypePointer IRType |
-              IRTypeFunction [IRType] IRType
+              IRTypeFunction [IRType] IRType |
+              IRTypeStruct [IRType]
 
 -- | The type of a 32 bit integer. Handy alias to have.
 typeint32 :: IRType
@@ -25,6 +26,8 @@ instance Pretty IRType where
   pretty (IRTypeFunction params ret) =
     parens (hcat . punctuate comma $ pparams) <+> pretty "->" <+> pretty ret where
       pparams = map pretty params
+  pretty (IRTypeStruct tys) = pretty "struct" <+>
+    parens (hcat (punctuate comma (map pretty tys)))
 
 -- | A label that uses the phantom @a as a type based discriminator
 data Label a = Label { unLabel ::  String } deriving(Eq, Ord)
