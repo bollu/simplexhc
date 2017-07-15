@@ -15,9 +15,14 @@ data IRType = IRTypeInt Int | -- ^ number of bits
               IRTypeFunction [IRType] IRType |
               IRTypeStruct [IRType]
 
+-- | The type of something that points to a block of memory from, say, malloc.
+-- | consider this as void*.
+irTypeMemoryPtr :: IRType
+irTypeMemoryPtr = IRTypePointer (IRTypeInt 8)
+
 -- | The type of a 32 bit integer. Handy alias to have.
-typeint32 :: IRType
-typeint32 = IRTypeInt 32
+irTypeInt32 :: IRType
+irTypeInt32 = IRTypeInt 32
 
 instance Pretty IRType where
   pretty (IRTypeInt i) = pretty "int" <+> pretty i

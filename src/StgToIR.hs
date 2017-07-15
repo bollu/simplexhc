@@ -15,6 +15,39 @@ import Data.Text.Prettyprint.Doc as PP
 import qualified OrderedMap as M
 import qualified Data.List as L
 
+
+-- | The type of an entry function
+-- | () -> void
+irTypeEntryFn :: IRType
+irTypeEntryFn = IRTypeFunction [] IRTypeVoid
+
+
+-- | The type of the ID of a heap object
+irTypeHeapObjId :: IRType
+irTypeHeapObjId = irTypeInt32
+
+-- | The type of an entry function we need to tail call into.
+-- remember, "boxed value" is a lie, they're just functions.
+irTypeEntryFnPtr :: IRType
+irTypeEntryFnPtr = IRTypePointer irTypeEntryFn
+
+-- | Type of the info struct
+-- struct {}
+irTypeInfoStruct :: IRType
+irTypeInfoStruct = IRTypeStruct [ irTypeEntryFnPtr, -- pointer to function to call,
+                                  irTypeHeapObjId -- ID of this object
+                                ]
+
+
+-- | Type of a heap object
+-- TODO: keep a pointer to the info table. Right now, just store the
+-- info table since it was easier to do this.
+-- struct { info, void *mem }
+irTypeHeapObject :: IRType
+irTypeHeapObject = IRTypeStruct [irTypeInfoStruct, -- info table,
+                                 irTypeMemoryPtr -- data payload
+                                 ]
+
 -- | Int value corresponding to binding
 type BindingIntVal = Int
 -- | Data associated to a binding
@@ -61,8 +94,8 @@ getBindsInProgram prog = prog >>= collectBindingsInBinding
 
 
 -- | Build the function stubs that corresponds to the binding.
--- | We first build all the stubs to populate the Context. Then, we can build
--- | the indivisual bindings.
+-- We first build all the stubs to populate the Context. Then, we can build
+-- the indivisual bindings.
 buildFnStubForBind :: Binding -> State ModuleBuilder Value
 buildFnStubForBind Binding{..} = let
     paramsty = []
@@ -73,16 +106,13 @@ buildFnStubForBind Binding{..} = let
 
 
 
- -- | The type of a boxed value
-typeBoxed :: IRType
-typeBoxed = IRTypePointer (IRTypeFunction [] IRTypeVoid)
 
 -- | Create a function that pushes values on the stack
-_createStackPushFn :: String ->  -- ^function name
-                      IRType -> -- ^type of stack elements
-                      Value -> -- ^count global
-                      Value -> -- ^stack pointer global
-                      State ModuleBuilder Value
+_createStackPushFn :: String  -- ^function name
+                      -> IRType -- ^type of stack elements
+                      -> Value-- ^count global
+                      -> Value -- ^stack pointer global
+                      -> State ModuleBuilder Value
 _createStackPushFn fnname elemty nG stackGP = do
   lbl <- createFunction [elemty] IRTypeVoid fnname
   runFunctionBuilder lbl $ do
@@ -102,11 +132,11 @@ _createStackPushFn fnname elemty nG stackGP = do
 
 
 -- | Create a function that pops values off the stack
-_createStackPopFn :: String -> -- ^Function name
-                     IRType -> -- ^type of stack elements
-                     Value -> -- ^count global
-                     Value -> -- ^stack pointer global
-                     State ModuleBuilder Value
+_createStackPopFn :: String -- ^Function name
+                     -> IRType -- ^type of stack elements
+                     -> Value -- ^count global
+                     -> Value -- ^stack pointer global
+                     -> State ModuleBuilder Value
 _createStackPopFn fnname elemty nG stackGP = do
   lbl <- createFunction [] elemty  fnname
   runFunctionBuilder lbl $ do
@@ -126,7 +156,7 @@ _createStackPopFn fnname elemty nG stackGP = do
 
 
 -- | Create the `Context` object that is contains data needed to build all of the
--- | LLVM Module for our program.
+-- LLVM Module for our program.
 createContext :: [Binding] -> State ModuleBuilder Context
 createContext bs = do
   rawstack <- createGlobalVariable "stackraw" (IRTypePointer (IRTypeInt 32))
@@ -144,11 +174,11 @@ createContext bs = do
                   binding=b} | bival <- [1..] | fn <- bfns | b <- bs]
   let bnames = map (_bindingName . binding) bdatas
 
-  pushboxed <- _createStackPushFn "pushbox" typeBoxed boxn boxstack
-  popboxed <- _createStackPopFn "popbox" typeBoxed boxn boxstack
+  pushboxed <- _createStackPushFn "pushbox" irTypeEntryFnPtr boxn boxstack
+  popboxed <- _createStackPopFn "popbox" irTypeEntryFnPtr boxn boxstack
 
-  pushint <- _createStackPushFn "pushint" typeint32 boxn boxstack
-  popint <- _createStackPopFn "popint" typeint32 boxn boxstack
+  pushint <- _createStackPushFn "pushint" irTypeInt32 boxn boxstack
+  popint <- _createStackPopFn "popint" irTypeInt32 boxn boxstack
 
   return $ Context {
     rawstackGP=rawstack,
@@ -171,7 +201,7 @@ pushBoxed ctx val = do
   return ()
 
 -- | Create the instruction to pop a function from the stack.
--- | Note that return value needs to be named with (=:=)
+-- Note that return value needs to be named with (=:=)
 popBoxed :: Context -> Inst
 popBoxed ctx =
   let f = fnpopboxed ctx in InstCall f []
@@ -183,7 +213,7 @@ pushInt ctx val = do
   appendInst $ InstCall f [val]
 
 -- | Create the instruction to pop a function from the stack.
--- | Note that return value needs to be named with (=:=)
+-- Note that return value needs to be named with (=:=)
 popInt :: Context -> Inst
 popInt ctx =
   let f = fnpopint ctx in InstCall f []
@@ -193,9 +223,9 @@ createMatcher ctx = do
     runFunctionBuilder (fnmatcher ctx) (buildMatcherFn_ (bindingNameToData ctx))
     where
     -- | Build a BB of the matcher that mathes with the ID and returns the
-    -- | actual function.
-    -- | Return the IR::Value of the switch case needed, and the label of the BB
-    -- | to jump to.
+    -- actual function.
+    -- Return the IR::Value of the switch case needed, and the label of the BB
+    -- to jump to.
     buildMatchBBForBind_ :: M.OrderedMap VarName BindingData -> VarName -> State FunctionBuilder (Value, BBLabel)
     buildMatchBBForBind_ bdata bname = do
       bbid <- createBB  ("switch." ++ (_unVarName bname))
@@ -207,7 +237,7 @@ createMatcher ctx = do
       return ((ValueConstInt 3), bbid)
       -- return ((ValueConstInt bintval), bbid)
     -- | Build the matcher function, that takes a function ID and returns the
-    -- | function corresponding to the ID.
+    -- function corresponding to the ID.
     buildMatcherFn_ :: M.OrderedMap VarName BindingData ->
                        State FunctionBuilder ()
     buildMatcherFn_ bdata = do
@@ -233,11 +263,11 @@ pushAtomToStack ctx nametoval (AtomVarName v) = pushBoxed ctx (nametoval M.! v)
 
 
 -- | Generate code for an expression node in the IR
-codegenExprNode :: Context ->
-                  [VarName] -> -- ^free variables
-                  [VarName] -> -- ^bound variables
-                  ExprNode -> -- ^expression node
-                  State FunctionBuilder ()
+codegenExprNode :: Context
+                  -> [VarName] -- ^free variables
+                  -> [VarName] -- ^bound variables
+                  -> ExprNode -- ^expression node
+                  -> State FunctionBuilder ()
 -- | Function appplication codegen
 codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
   -- if bound = A B C, stack will have

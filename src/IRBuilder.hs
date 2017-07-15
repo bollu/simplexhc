@@ -73,10 +73,10 @@ _getParamName :: Int -> Label Param
 _getParamName i = Label ("param." ++ show i)
 
 -- | Create a new function builder with an empty basic block
-_createFunctionBuilder :: [IRType] -> -- ^Parameter types
-                      IRType -> -- ^Return type
-                      FunctionLabel -> -- ^Function Name
-                      FunctionBuilder
+_createFunctionBuilder :: [IRType] -- ^ Parameter types
+                      -> IRType -- ^ Return type
+                      -> FunctionLabel -- ^ Function Name
+                      -> FunctionBuilder
 _createFunctionBuilder paramsty retty label =
   execState mkDefaultBB initbuilder
     where
