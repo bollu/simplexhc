@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ParallelListComp #-}
 module StgToIR where
-import StgLanguage
+import StgLanguage hiding (constructorName)
 import ColorUtils
 
 import Debug.Trace
@@ -14,17 +14,26 @@ import Control.Monad.State.Strict
 import Data.Text.Prettyprint.Doc as PP
 import qualified OrderedMap as M
 import qualified Data.List as L
+import qualified Data.Set as S
 
+(&) :: a -> (a -> b) -> b
+(&) = flip ($)
 
--- | The type of an entry function
+-- | The type of an entry function.
 -- | () -> void
 irTypeEntryFn :: IRType
 irTypeEntryFn = IRTypeFunction [] IRTypeVoid
 
 
+-- | The type of a continuation given by alts
+-- | () -> void
+irTypeContinuation :: IRType
+irTypeContinuation = irTypeEntryFn
+
 -- | The type of the ID of a heap object
 irTypeHeapObjId :: IRType
 irTypeHeapObjId = irTypeInt32
+
 
 -- | The type of an entry function we need to tail call into.
 -- remember, "boxed value" is a lie, they're just functions.
@@ -38,22 +47,29 @@ irTypeInfoStruct = IRTypeStruct [ irTypeEntryFnPtr, -- pointer to function to ca
                                   irTypeHeapObjId -- ID of this object
                                 ]
 
+-- | Type of the constructor tag
+irTypeConstructorTag :: IRType
+irTypeConstructorTag = irTypeInt32
 
 -- | Type of a heap object
--- TODO: keep a pointer to the info table. Right now, just store the
--- info table since it was easier to do this.
+-- TODO: keep a pointer to the info table. Right now, just store a copy of the
+-- info table, since it is way easier to do this.
 -- struct { info, void *mem }
 irTypeHeapObject :: IRType
 irTypeHeapObject = IRTypeStruct [irTypeInfoStruct, -- info table,
                                  irTypeMemoryPtr -- data payload
                                  ]
 
+-- | A pointer to a heap object
+irTypeHeapObjectPtr :: IRType
+irTypeHeapObjectPtr = IRTypePointer irTypeHeapObject
+
 -- | Int value corresponding to binding
-type BindingIntVal = Int
+type BindingId = Int
 -- | Data associated to a binding
 data BindingData = BindingData {
   binding :: Binding,
-  bindingIntVal :: BindingIntVal,
+  bindingId :: BindingId,
   bindingFn :: Value
 }
 
@@ -61,36 +77,48 @@ instance Pretty BindingData where
   pretty BindingData{..}=
     vcat [pretty "BindingData {",
       indent 4 (vcat $ [pretty "binding :=" <+> pretty binding,
-                      pretty "id := " <+> pretty bindingIntVal,
+                      pretty "id := " <+> pretty bindingId,
                       pretty "bindingFn :=" <+> pretty bindingFn]), pretty "}"]
 
--- | G = global, P = pointer. General Context that we need throughout.
-data Context = Context {
-    -- | Stack pointer to raw values.
-    rawstackGP:: Value,
-    -- | Stack pointer to function values.
-    boxstackGP:: Value,
-    -- | Number of raw values on the stack.
-    rawnG  :: Value,
-    -- | Number of function values on the stack.
-    boxstacknG :: Value,
-    -- | Binding name to binding data
-    bindingNameToData :: M.OrderedMap VarName BindingData,
-    -- | Matcher function
-    fnmatcher :: Value,
-    -- | function to push boxed value to stack
-    fnpushboxed :: Value,
-    -- | function to pop boxed value on stack
-    fnpopboxed :: Value,
-    -- | function to push a raw int to stack
-    fnpushint :: Value,
-    -- | function to pop an int from the stack
-    fnpopint :: Value
+
+-- | Int val corresponding to to constructor
+type ConstructorId = Int
+
+data ConstructorData = ConstructorData {
+  constructorName :: ConstructorName,
+  constructorId :: ConstructorId
 }
 
--- | ID of a binding
+-- | TODO: create an IRStack object to represent a stack in LLVM IR
+-- | G = global, P = pointer. General Context that we need throughout.
+data Context = Context {
+    -- | Stack pointer to continuation values.
+    contstackGP:: Value,
+    -- | Number of continuation values on the stack.
+    contstacknG :: Value,
+    -- | Register for the tag of a constructor
+    rtagG :: Value,
+    -- | Binding name to binding data
+    bindingNameToData :: M.OrderedMap VarName BindingData,
+    -- | constructor name to constructor data
+    constructorNameToData :: M.OrderedMap VarName ConstructorData,
+    -- | Matcher function
+    fnmatcher :: Value,
+    -- | function to push continuation value to stack
+    fnpushcont :: Value,
+    -- | function to pop continuation value on stack
+    fnpopcont :: Value
+}
+
+
+-- | Get all bindings in a program
 getBindsInProgram :: Program -> [Binding]
 getBindsInProgram prog = prog >>= collectBindingsInBinding
+
+
+-- | Get all constructors in a program
+getConstructorNamesInProgram :: Program -> [ConstructorName]
+getConstructorNamesInProgram prog = prog >>= collectConstructorNamesInBinding
 
 
 -- | Build the function stubs that corresponds to the binding.
@@ -105,7 +133,17 @@ buildFnStubForBind Binding{..} = let
     createFunction paramsty retty fnname
 
 
-
+-- | Create a function that allocates a constructor heap object.
+_createAllocConstructorFn ::  State ModuleBuilder Value
+_createAllocConstructorFn = do
+  lbl <- createFunction [irTypeHeapObjId] irTypeHeapObjectPtr "alloc_constructor"
+  runFunctionBuilder lbl $ do
+    mem <- "mem" =:= InstMalloc irTypeHeapObject
+    heapObjIdLoc <- "heapObjIdLoc" =:= InstGEP mem [ValueConstInt 0, ValueConstInt 0, ValueConstInt 1]
+    idval <- getParamValue 0
+    appendInst $ InstStore heapObjIdLoc idval
+    return ()
+  return lbl
 
 -- | Create a function that pushes values on the stack
 _createStackPushFn :: String  -- ^function name
@@ -116,7 +154,6 @@ _createStackPushFn :: String  -- ^function name
 _createStackPushFn fnname elemty nG stackGP = do
   lbl <- createFunction [elemty] IRTypeVoid fnname
   runFunctionBuilder lbl $ do
-      -- load the rawn value
       n <- "n" =:= InstLoad nG
       -- Load the pointer
       stackP <- "stackp" =:= InstLoad stackGP
@@ -140,7 +177,6 @@ _createStackPopFn :: String -- ^Function name
 _createStackPopFn fnname elemty nG stackGP = do
   lbl <- createFunction [] elemty  fnname
   runFunctionBuilder lbl $ do
-      -- load the rawn value
       n <- "n" =:= InstLoad nG
       -- Load the pointer
       stackP <- "stackp" =:= InstLoad stackGP
@@ -157,66 +193,61 @@ _createStackPopFn fnname elemty nG stackGP = do
 
 -- | Create the `Context` object that is contains data needed to build all of the
 -- LLVM Module for our program.
-createContext :: [Binding] -> State ModuleBuilder Context
-createContext bs = do
-  rawstack <- createGlobalVariable "stackraw" (IRTypePointer (IRTypeInt 32))
-  boxstack <- createGlobalVariable "stackfn" (IRTypePointer (IRTypeFunction [] IRTypeVoid))
-  rawn <- createGlobalVariable "rawn" (IRTypeInt 32)
-  boxn <- createGlobalVariable "fnn" (IRTypeInt 32)
+createContext :: [Binding] -> [Constructor] -> State ModuleBuilder Context
+createContext bs cs = do
+  contstack <- createGlobalVariable "stackcont" (IRTypePointer irTypeContinuation)
+  contn <- createGlobalVariable "contn" (IRTypeInt 32)
   bfns <- for bs buildFnStubForBind
+
+  rtag <- createGlobalVariable "rtag" irTypeConstructorTag
 
   let matcherretty = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
   fnmatcher <- createFunction [] matcherretty "matcher"
 
   let bdatas = [BindingData {
-                  bindingIntVal=bival,
+                  bindingId=bid,
                   bindingFn=fn,
-                  binding=b} | bival <- [1..] | fn <- bfns | b <- bs]
+                  binding=b} | bid <- [1..] | fn <- bfns | b <- bs]
   let bnames = map (_bindingName . binding) bdatas
 
-  pushboxed <- _createStackPushFn "pushbox" irTypeEntryFnPtr boxn boxstack
-  popboxed <- _createStackPopFn "popbox" irTypeEntryFnPtr boxn boxstack
 
-  pushint <- _createStackPushFn "pushint" irTypeInt32 boxn boxstack
-  popint <- _createStackPopFn "popint" irTypeInt32 boxn boxstack
+  let cdatas = [ConstructorData {
+    constructorId=cid,
+    constructorName=cname
+  } | cid <- [1..] | cname <- cnames]
+
+  let cnames = map constructorName cdatas
+
+
+  pushcont <- _createStackPushFn "pushcont" irTypeContinuation contn contstack
+  popcont <- _createStackPopFn "popcont" irTypeContinuation contn contstack
+
+  -- allocContructor <- _createAllocConstructorFn
 
   return $ Context {
-    rawstackGP=rawstack,
-    boxstackGP=boxstack,
-    rawnG=rawn,
-    boxstacknG=boxn,
+    contstackGP=contstack,
+    contstacknG=contn,
+    rtagG=rtag,
     bindingNameToData=M.fromList (zip bnames bdatas),
+    constructorNameToData=M.fromList (zip cnames cdatas),
     fnmatcher=fnmatcher,
-    fnpushboxed=pushboxed,
-    fnpopboxed=popboxed,
-    fnpushint=pushint,
-    fnpopint=popint
+    fnpushcont=pushcont,
+    fnpopcont=popcont
  }
 
--- | Push a function into the stack
-pushBoxed :: Context -> Value -> State FunctionBuilder ()
-pushBoxed ctx val = do
-  let f = fnpushboxed ctx
+-- | Push a continuation into the stack. Used by alts
+pushCont :: Context -> Value -> State FunctionBuilder ()
+pushCont ctx val = do
+  let f = fnpushcont ctx
   appendInst $ InstCall f [val]
   return ()
 
--- | Create the instruction to pop a function from the stack.
+-- | Create the instruction to pop a continuation from the stack.
+-- Used by alts.
 -- Note that return value needs to be named with (=:=)
-popBoxed :: Context -> Inst
-popBoxed ctx =
-  let f = fnpopboxed ctx in InstCall f []
-
--- | Push an int to the stack
-pushInt :: Context -> Value -> State FunctionBuilder ()
-pushInt ctx val = do
-  let f = fnpushint ctx
-  appendInst $ InstCall f [val]
-
--- | Create the instruction to pop a function from the stack.
--- Note that return value needs to be named with (=:=)
-popInt :: Context -> Inst
-popInt ctx =
-  let f = fnpopint ctx in InstCall f []
+popCont :: Context -> Inst
+popCont ctx =
+  let f = fnpushcont ctx in InstCall f []
 
 createMatcher :: Context -> State ModuleBuilder ()
 createMatcher ctx = do
@@ -230,12 +261,12 @@ createMatcher ctx = do
     buildMatchBBForBind_ bdata bname = do
       bbid <- createBB  ("switch." ++ (_unVarName bname))
       focusBB bbid
-      let bfn = bindingFn (bdata M.! bname) :: Value
-      let bintval = bindingIntVal (bdata M.! bname) :: BindingIntVal
+      let bfn = (bdata M.! bname) & bindingFn :: Value
+      let bid = (bdata M.! bname) & bindingId :: BindingId
 
       -- setRetInst (RetInstReturn (ValueFnPointer bfn))
       return ((ValueConstInt 3), bbid)
-      -- return ((ValueConstInt bintval), bbid)
+      -- return ((ValueConstInt bid), bbid)
     -- | Build the matcher function, that takes a function ID and returns the
     -- function corresponding to the ID.
     buildMatcherFn_ :: M.OrderedMap VarName BindingData ->
@@ -252,80 +283,76 @@ createMatcher ctx = do
 -- | Create a call to the matcher to return the function with name VarName
 createMatcherCallWithName :: Context -> VarName -> Inst
 createMatcherCallWithName ctx bname = let
-  bintval = bindingIntVal $ (bindingNameToData ctx) M.! bname
-  in InstCall (fnmatcher ctx) [(ValueConstInt bintval)]
+  bid = bindingId $ (bindingNameToData ctx) M.! bname
+  in InstCall (fnmatcher ctx) [(ValueConstInt bid)]
 
 
 -- | push an STG atom to the correct stack
 pushAtomToStack :: Context -> M.OrderedMap VarName Value -> Atom -> State FunctionBuilder ()
-pushAtomToStack ctx _ (AtomInt (StgInt i)) =  pushInt ctx (ValueConstInt i)
-pushAtomToStack ctx nametoval (AtomVarName v) = pushBoxed ctx (nametoval M.! v)
+pushAtomToStack ctx _ (AtomInt (StgInt i)) =
+  pushInt ctx (ValueConstInt i) where
+    pushInt _ _ = error "Unimplemented pushInt"
+pushAtomToStack ctx nametoval (AtomVarName v) = pushCont ctx (nametoval M.! v)
 
 
 -- | Generate code for an expression node in the IR
 codegenExprNode :: Context
-                  -> [VarName] -- ^free variables
-                  -> [VarName] -- ^bound variables
+                  -> M.OrderedMap VarName Value -- ^mapping between variable name and which value to use to access this
                   -> ExprNode -- ^expression node
                   -> State FunctionBuilder ()
 -- | Function appplication codegen
-codegenExprNode ctx free bound (ExprNodeFnApplication fnname atoms) = do
-  -- if bound = A B C, stack will have
-  -- C
-  -- B
-  -- A
-  -- So we need to reverse the stack
-  boundvals <-  for (reverse bound) (\b -> (_unVarName b) =:= (popBoxed ctx))
-  let boundNameToVal = M.fromList $ zip bound boundvals :: M.OrderedMap VarName Value
-  let toplevelNameToVal = fmap bindingFn (bindingNameToData ctx) :: M.OrderedMap VarName Value
-
-  fn <- case fnname `L.elemIndex` bound of
-          Just idx -> return $ boundvals L.!! idx
+codegenExprNode ctx nametoval (ExprNodeFnApplication fnname atoms) = do
+  fn <- case fnname `M.lookup` nametoval of
+          Just fn_ -> return $ fn_
           Nothing -> -- actually we should check globals, but fuck it for now
-                     "fn" =:= createMatcherCallWithName ctx fnname
-  for atoms (pushAtomToStack ctx (boundNameToVal `M.union` toplevelNameToVal))
+                     -- "fn" =:= createMatcherCallWithName ctx fnname
+                     error "unimplemented, what should I do in this context?"
+  for atoms (pushAtomToStack ctx nametoval)
   appendInst $ InstCall fn []
 
   return ()
 
 -- | Constructor codegen
-codegenExprNode ctx free bound (ExprNodeConstructor (Constructor name atoms)) = do
+codegenExprNode ctx nametoval (ExprNodeConstructor (Constructor name atoms)) = do
+  jumpfn <- "jumpfn" =:= popCont ctx
+  for atoms (pushAtomToStack ctx nametoval)
+  appendInst $ InstCall jumpfn []
+  return ()
+
+
+codegenExprNode _ nametoval  e = error . docToString $
+  vcat [pretty " Unimplemented codegen for exprnode: ", indent 4 (pretty e)]
+
+-- | Setup a binding with name VarName
+setupTopLevelBinding :: Context -> VarName -> State FunctionBuilder ()
+setupTopLevelBinding ctx name = do
+  let b = binding $ (bindingNameToData ctx) M.! name :: Binding
+  let Lambda{_lambdaFreeVarIdentifiers=free,
+             _lambdaBoundVarIdentifiers=bound,
+             _lambdaExprNode=e} = _bindingLambda b
+
     -- if bound = A B C, stack will have
     -- C
     -- B
     -- A
     -- So we need to reverse the stack
-    boundvals <-  for (reverse bound) (\b -> (_unVarName b) =:= (popBoxed ctx))
-    let boundNameToVal = M.fromList $ zip bound boundvals :: M.OrderedMap VarName Value
-    let toplevelNameToVal = fmap bindingFn (bindingNameToData ctx) :: M.OrderedMap VarName Value
-    error "working on this"
-    return ()
+  boundvals <-  for (reverse bound) (\b -> (_unVarName b) =:= (popCont ctx))
+  let boundNameToVal = M.fromList $ zip bound boundvals :: M.OrderedMap VarName Value
+  let toplevelNameToVal = fmap bindingFn (bindingNameToData ctx) :: M.OrderedMap VarName Value
 
+  let nameToVal = boundNameToVal `M.union` toplevelNameToVal
 
-
-
-
-
-codegenExprNode _ _ _ e = error . docToString $
-  vcat [pretty " Unimplemented codegen for exprnode: ", indent 4 (pretty e)]
-
--- | Setup a binding with name VarName
-setupBinding_ :: Context -> VarName -> State FunctionBuilder ()
-setupBinding_ ctx name = do
-  let b = binding $ (bindingNameToData ctx) M.! name :: Binding
-  let Lambda{_lambdaFreeVarIdentifiers=free,
-             _lambdaBoundVarIdentifiers=bound,
-             _lambdaExprNode=e} = _bindingLambda b
-  codegenExprNode ctx free bound e
+  codegenExprNode ctx nameToVal e
 
 
 programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
     let bs = getBindsInProgram p
-    ctx <- createContext bs
+    let cs = getConstructorsInProgram p
+    ctx <- createContext bs cs
     createMatcher ctx
     for_ (M.toList . bindingNameToData $ ctx)
           (\(bname, bdata) -> runFunctionBuilder
                                   (bindingFn bdata)
-                                  (setupBinding_ ctx bname))
+                                  (setupTopLevelBinding ctx bname))
     return ()

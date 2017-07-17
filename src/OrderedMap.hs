@@ -7,7 +7,7 @@ module OrderedMap(OrderedMap,
   fromList,
   size,
   adjust,
-  insert, 
+  insert,
   elems,
   toList,
   keys,
@@ -17,7 +17,7 @@ module OrderedMap(OrderedMap,
 import qualified Data.Map.Strict as M
 import Data.Monoid
 import ColorUtils
-import Data.Text.Prettyprint.Doc 
+import Data.Text.Prettyprint.Doc
 import qualified Data.List as L
 
 -- At some point, I need this. This is more convenient than overloading the key to store the insertion time.
@@ -45,7 +45,7 @@ liftMapExtract_ f (OrderedMap map' _) = f map'
 -- | NOTE: this will maintain the order of insertion. Elements that are inserted
 -- | later are returned later in the `keys`, `elems`.
 insert  :: Ord k => k -> a -> OrderedMap k a -> OrderedMap k a
-insert k a om@OrderedMap{..} = 
+insert k a om@OrderedMap{..} =
   case (liftMapExtract_ (M.lookup k)) om of
     Nothing -> OrderedMap (M.insert k a map') (order ++ [k])
     -- If the key already exists, keep the old order
@@ -67,7 +67,7 @@ elems :: Ord k => OrderedMap k a -> [a]
 elems (OrderedMap{order=order, map'=map'}) = map (map' M.!) order
 
 union :: (Eq k, Ord k) => OrderedMap k a -> OrderedMap k a -> OrderedMap k a
-union (OrderedMap{order=o1, map'=m1}) (OrderedMap{order=o2, map'=m2}) = 
+union (OrderedMap{order=o1, map'=m1}) (OrderedMap{order=o2, map'=m2}) =
   OrderedMap{map'=m1 `M.union` m2, order=L.nub(o1++o2)}
 
 -- | Return the list of key value pairs in the order of insertion.
@@ -78,10 +78,10 @@ adjust :: Ord k => (a -> a) -> k -> OrderedMap k a -> OrderedMap k a
 adjust f k = liftMapEdit_ (M.adjust f k)
 
 (!) :: (Ord k, Pretty k, Pretty a) => OrderedMap k a -> k -> a
-ok ! k = 
+ok ! k =
   case (OrderedMap.lookup k ok) of
            Just a -> a
-           Nothing -> error . docToString $ 
+           Nothing -> error . docToString $
                vcat [pretty "key missing, has no value associated with it: " <+> pretty k, indent 4 (pretty ok)]
 
 

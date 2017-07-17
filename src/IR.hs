@@ -39,9 +39,9 @@ data Label a = Label { unLabel ::  String } deriving(Eq, Ord)
 instance Pretty (Label a) where
   pretty (Label s) = pretty s
 
--- a Value, which can either be a constant, or a reference to an instruction.
+-- a Value which can be passed as an operand to an instruction
 data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function) |
-             ValueGlobalRef (Label GlobalValue)
+             ValueGlobalRef (Label GlobalValue) | ValueSizeOf(IRType)
 
 -- a GlobalValue, that is a value of a global variable.
 data GlobalValue = GlobalValue { gvType :: IRType, gvValue :: Maybe Value }
@@ -56,22 +56,34 @@ instance Pretty Value where
   pretty (ValueParamRef name) = pretty "%param." <> pretty name
   pretty (ValueFnPointer name) = pretty "%fnptr." <> pretty name
   pretty (ValueGlobalRef name) = pretty "@" <> pretty name
+  pretty (ValueSizeOf name) = pretty "@" <> pretty name
 
 -- | Instructions that we allow within a basic block.
 data Inst where
-  InstAlloc :: Inst
   InstAdd :: Value -> Value -> Inst
   InstMul :: Value -> Value -> Inst
   InstL :: Value -> Value -> Inst
   InstAnd :: Value -> Value -> Inst
+  -- | Load a value from a memory location
   InstLoad :: Value -> Inst
-  InstStore :: Value -> Value -> Inst
-  InstGEP :: Value -> [Value] -> Inst
+  -- | Store a value
+  InstStore :: Value -- ^Store location
+               -> Value -- ^Value to store
+               -> Inst
+  -- | GetElementPtr
+  InstGEP :: Value -- ^Root of GEP
+             -> [Value] -- ^ Indexing expression
+             -> Inst
   InstPhi :: NE.NonEmpty (BBLabel, Value) -> Inst
-  InstCall :: Value -> [Value] -> Inst
+  -- | Call a function
+  InstCall :: Value -- ^ Function name
+              -> [Value] -- ^Parameters
+              -> Inst
+  -- | Allocate memory.
+  InstMalloc :: IRType -- ^type to alloc
+               -> Inst
 
 instance Pretty Inst where
-  pretty (InstAlloc) = pretty "alloc"
   pretty (InstAdd l r) = pretty "add" <+> pretty l <+> pretty r
   pretty (InstMul l r) = pretty "mul" <+> pretty l <+> pretty r
   pretty (InstL l r) = pretty "lessthan" <+> pretty l <+> pretty r
@@ -91,6 +103,9 @@ instance Pretty Inst where
   pretty (InstCall fn params) =
     pretty "call" <+> pretty fn <+>
       braces (hcat (punctuate comma (map pretty params)))
+
+  pretty (InstMalloc mem) =
+    pretty "malloc" <+> pretty mem
 
 -- | Represents @a that is optionally named by a @Label a
 data Named a = Named { namedName :: Label a, namedData :: a } | UnNamed { namedData :: a}

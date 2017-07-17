@@ -58,16 +58,48 @@ type Program = [Binding]
 
 
 
+-- | collect `Binding` in the expression
 collectBindingsInExpr :: ExprNode -> [Binding]
 collectBindingsInExpr (ExprNodeBinop l _ r) = collectBindingsInExpr l ++ collectBindingsInExpr r
 collectBindingsInExpr (ExprNodeFnApplication _ _) = []
 collectBindingsInExpr (ExprNodeConstructor _) = []
-collectBindingsInExpr (ExprNodeLet _ bindings expr) = (bindings >>= collectBindingsInBinding) ++ collectBindingsInExpr expr
+collectBindingsInExpr (ExprNodeLet _ bindings expr) =
+  (bindings >>= collectBindingsInBinding) ++ collectBindingsInExpr expr
 collectBindingsInExpr (ExprNodeCase case' alts) = collectBindingsInExpr case'
 collectBindingsInExpr (ExprNodeInt _ ) = []
 
+-- | collect bindings in a binding
 collectBindingsInBinding :: Binding -> [Binding]
 collectBindingsInBinding b@(Binding _ lambda) = b:(collectBindingsInExpr . _lambdaExprNode $ lambda)
+
+
+
+-- | collect constructors in case alts
+collectConstructorNamesInCaseAlt :: CaseAltType -> [ConstructorName]
+collectConstructorNamesInCaseAlt
+  (CaseAltConstructor
+    (CaseAlt{
+      _caseAltLHS=ConstructorPatternMatch c _
+    })) = [c]
+collectConstructorNamesInCaseAlt _ = []
+
+
+-- | collect constructors in an expression
+collectConstructorNamesInExpr :: ExprNode -> [ConstructorName]
+collectConstructorNamesInExpr (ExprNodeBinop l _ r) =
+  collectConstructorNamesInExpr l ++ collectConstructorNamesInExpr r
+collectConstructorNamesInExpr (ExprNodeFnApplication _ _) = []
+collectConstructorNamesInExpr (ExprNodeConstructor (Constructor name _)) = [name]
+collectConstructorNamesInExpr (ExprNodeLet _ bindings expr) =
+  (bindings >>= collectConstructorNamesInBinding) ++ collectConstructorNamesInExpr expr
+collectConstructorNamesInExpr (ExprNodeCase case' alts) =
+  collectConstructorNamesInExpr case'  ++ (alts >>= collectConstructorNamesInCaseAlt)
+collectConstructorNamesInExpr (ExprNodeInt _ ) = []
+
+-- | collect constructors in the binding
+collectConstructorNamesInBinding :: Binding -> [ConstructorName]
+collectConstructorNamesInBinding (Binding _ lambda) =
+  collectConstructorNamesInExpr . _lambdaExprNode $ lambda
 
 data Constructor = Constructor { _constructorName :: !ConstructorName,
                                  _constructorAtoms :: ![Atom]
@@ -184,19 +216,22 @@ instance Pretty ExprNode where
                                              (pretty eleft) <+>
                                              (pretty eright)
     pretty (ExprNodeLet isrecursive bindings expr) =
-          letname <+>
-          vcat [bindingsstr,
-                (pretty "in"),
-                (expr & pretty)] where
-                        letname = pretty (if isrecursive == LetNonRecursive then "let" else "letrec")
-                        bindingsstr = map pretty bindings & vcat
+        letname <+>
+        vcat [bindingsstr,
+              (pretty "in"),
+              (expr & pretty)]
+        where
+          letname = pretty (if isrecursive == LetNonRecursive then "let" else "letrec")
+          bindingsstr = map pretty bindings & vcat
 
 
     pretty (ExprNodeConstructor constructor) = pretty constructor
 
     pretty (ExprNodeInt n) = pretty n
-    pretty (ExprNodeCase e alts) = pretty "case" <+> pretty e <+> pretty "of" <+> pretty "{" <+> (mkNest altsDoc)  <+> pretty "}" where
-                                              altsDoc = fmap pretty alts & vcat
+    pretty (ExprNodeCase e alts) =
+      pretty "case" <+> pretty e <+> pretty "of" <+>
+      pretty "{" <+> (mkNest altsDoc)  <+> pretty "}" where
+        altsDoc = fmap pretty alts & vcat
 
 instance Show ExprNode where
     show = prettyToString
