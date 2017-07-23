@@ -47,7 +47,7 @@ commandLineOptionsParserInfo = info commandLineOptionsParser infomod where
     infomod = fullDesc <> progDesc "STG -> LLVM compiler" <> header "simplexhc"
 
 repl :: InputT IO ()
-repl = do 
+repl = do
     lift . putStrLn $ "\n"
     line <- getInputLine ">"
     case line of
@@ -68,12 +68,12 @@ repl = do
           (Right trace) -> putStr . getTraceString $ trace
 
 getTraceString :: ([PushEnterMachineState], Maybe StgError) -> String
-getTraceString (trace, mErr) = 
+getTraceString (trace, mErr) =
   traceStr ++ "\n\n\nFinal:\n==================================\n" ++ errStr where
   errStr = case mErr of
             Nothing -> "Success"
-            Just err -> show err ++ machineFinalStateLogStr 
-  traceStr = intercalate "\n\n==================================\n\n" (fmap show trace) 
+            Just err -> show err ++ machineFinalStateLogStr
+  traceStr = intercalate "\n\n==================================\n\n" (fmap show trace)
   machineFinalStateLogStr = if length trace == 0 then "" else "\nlog:\n====\n" ++ show ((last trace) ^. currentLog)
 
 runFileInterp :: String -> IO ()
@@ -82,7 +82,7 @@ runFileInterp fpath = do
     let mInitState = tryCompileString raw
     let trace = fmap genMachineTrace mInitState
     case trace of
-          (Left compileErr) -> do  
+          (Left compileErr) -> do
                                       putStrLn "compile error: "
                                       putStrLn  $ compileErr
           (Right trace) -> putStr . getTraceString $ trace
@@ -108,6 +108,6 @@ main = do
     opts <- execParser commandLineOptionsParserInfo
     if filepath opts == ""
         then runInputT defaultSettings repl
-        else if emitLLVM opts == False 
+        else if emitLLVM opts == False
         then runFileInterp (filepath opts)
         else runFileLLVM (filepath opts)

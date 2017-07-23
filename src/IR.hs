@@ -24,6 +24,10 @@ irTypeMemoryPtr = IRTypePointer (IRTypeInt 8)
 irTypeInt32 :: IRType
 irTypeInt32 = IRTypeInt 32
 
+-- | The type of a boolean.
+irTypeBool :: IRType
+irTypeBool = IRTypeInt 1
+
 instance Pretty IRType where
   pretty (IRTypeInt i) = pretty "int" <+> pretty i
   pretty IRTypeVoid = pretty "void"

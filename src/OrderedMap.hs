@@ -84,4 +84,5 @@ ok ! k =
            Nothing -> error . docToString $
                vcat [pretty "key missing, has no value associated with it: " <+> pretty k, indent 4 (pretty ok)]
 
-
+foldMapWithKey :: Monoid m => (k -> a -> m) -> OrderedMap k a -> m
+foldMapWithKey f = liftMapExtract_ (M.foldMapWithKey f)
