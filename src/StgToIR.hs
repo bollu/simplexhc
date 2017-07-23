@@ -2,6 +2,7 @@
 {-# LANGUAGE ParallelListComp #-}
 module StgToIR where
 import StgLanguage hiding (constructorName)
+import qualified StgLanguage as StgL
 import ColorUtils
 
 import Debug.Trace
@@ -101,7 +102,7 @@ data Context = Context {
     -- | Binding name to binding data
     bindingNameToData :: M.OrderedMap VarName BindingData,
     -- | constructor name to constructor data
-    constructorNameToData :: M.OrderedMap VarName ConstructorData,
+    constructorNameToData :: M.OrderedMap ConstructorName ConstructorData,
     -- | Matcher function
     fnmatcher :: Value,
     -- | function to push continuation value to stack
@@ -193,8 +194,8 @@ _createStackPopFn fnname elemty nG stackGP = do
 
 -- | Create the `Context` object that is contains data needed to build all of the
 -- LLVM Module for our program.
-createContext :: [Binding] -> [Constructor] -> State ModuleBuilder Context
-createContext bs cs = do
+createContext :: [Binding] -> [ConstructorName] -> State ModuleBuilder Context
+createContext bs cnames = do
   contstack <- createGlobalVariable "stackcont" (IRTypePointer irTypeContinuation)
   contn <- createGlobalVariable "contn" (IRTypeInt 32)
   bfns <- for bs buildFnStubForBind
@@ -216,7 +217,6 @@ createContext bs cs = do
     constructorName=cname
   } | cid <- [1..] | cname <- cnames]
 
-  let cnames = map constructorName cdatas
 
 
   pushcont <- _createStackPushFn "pushcont" irTypeContinuation contn contstack
@@ -348,7 +348,7 @@ setupTopLevelBinding ctx name = do
 programToModule :: Program -> Module
 programToModule p = runModuleBuilder $ do
     let bs = getBindsInProgram p
-    let cs = getConstructorsInProgram p
+    let cs = getConstructorNamesInProgram p
     ctx <- createContext bs cs
     createMatcher ctx
     for_ (M.toList . bindingNameToData $ ctx)
