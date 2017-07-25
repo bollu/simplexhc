@@ -65,6 +65,11 @@ constructInstType _ _ (InstAdd _ _) = irTypeInt32
 constructInstType _ _ (InstMul _ _) = irTypeInt32
 constructInstType _ _ (InstL _ _) = irTypeBool
 constructInstType _ _ (InstAnd _ _) = irTypeBool
+constructInstType ctx m gep@(InstGEP root _) =
+  trace (docToString $ pretty "constructing GEP type:" <+> pretty gep)
+  -- (_constructValueType ctx root)
+  ((IRTypePointer irTypeInt32))
+
 constructInstType ctx _ load@(InstLoad v) =
   case _constructValueType ctx v of
     IRTypePointer ty -> ty
@@ -165,6 +170,11 @@ irToLLVMType (IRTypeStruct fields) =
 _materializeRetInst :: Context -> RetInst -> L.Terminator
 _materializeRetInst ctx RetInstVoid = L.Ret {
   L.returnOperand=Nothing,
+  L.metadata'=[]
+}
+
+_materializeRetInst ctx (RetInstReturn val) = L.Ret {
+  L.returnOperand=Just (_materializeValueToOperand ctx val),
   L.metadata'=[]
 }
 -- # hack
