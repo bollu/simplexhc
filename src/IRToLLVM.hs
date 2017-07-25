@@ -1,4 +1,5 @@
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE Rank2Types #-}
 module IRToLLVM where
 
 -- | L = pure llvm-hs-pure imports
@@ -25,6 +26,9 @@ import Data.Text.Prettyprint.Doc as PP
 import ColorUtils
 import qualified Data.Word as W
 import qualified OrderedMap as M
+
+import Debug.Trace
+
 import IRBuilder
 import IR
 
@@ -61,13 +65,14 @@ constructInstType _ _ (InstMul _ _) = irTypeInt32
 constructInstType _ _ (InstL _ _) = irTypeBool
 constructInstType _ _ (InstAnd _ _) = irTypeBool
 constructInstType ctx _ load@(InstLoad v) =
-  case constructValueType ctx v of
+  case _constructValueType ctx v of
     IRTypePointer ty -> ty
     otherty -> error . docToString $
       pretty "unable to construct type for load: " <+> pretty load
+
 constructInstType ctx _ (InstStore _ _) = IRTypeVoid
 constructInstType ctx _ call@(InstCall fn _) =
-  case (constructValueType ctx fn) of
+  case _constructValueType ctx fn of
     IRTypeFunction _ retty -> retty
     otherty -> error . docToString $
       pretty "unabke to construct type for function call: " <+> pretty call
@@ -155,30 +160,30 @@ irToLLVMType (IRTypeStruct fields) =
 _materializeRetInst :: Context -> RetInst -> L.Terminator
 _materializeRetInst ctx r = error "unimplemented _materializeRetInst"
 
-constructValueType :: Context -> Value -> IRType
-constructValueType ctx val = error "constructValueType unimplemented"
--- | constructValueType (ValueConstInt _) =
+_constructValueType :: Context -> Value -> IRType
+_constructValueType ctx (ValueConstInt _) = irTypeInt32
+_constructValueType ctx (ValueInstRef name) = (instNameToType ctx) M.! name
+_constructValueType ctx (ValueParamRef name) =  getParamTypeFromContext ctx name
+_constructValueType ctx (ValueFnPointer fnname) = (functionNameToType ctx) M.! fnname
+_constructValueType ctx  (ValueGlobalRef name) =  (globalNameToType ctx) M.! name
 
-_materializeValueToOperand :: Context -> Value -> L.Operand
-_materializeValueToOperand ctx v@(ValueConstInt _) =
-  L.ConstantOperand $ (_materializeValueToConstant ctx) v
+-- | Get Name of the reference  where  Value is a reference value.
+_getValueReferenceName :: Value -> L.Name
+_getValueReferenceName (ValueInstRef name) = (labelToName name)
+_getValueReferenceName (ValueParamRef name) = (labelToName name)
+_getValueReferenceName (ValueFnPointer fnname) = (labelToName fnname)
+_getValueReferenceName (ValueGlobalRef name) = (labelToName name)
+_getValueReferenceName v = error . docToString $
+  pretty "value is not a reference:" <+> pretty v
 
-_materializeValueToOperand ctx (ValueInstRef name) = let
-  ty = (instNameToType ctx) M.! name
-  in L.LocalReference (irToLLVMType ty) (labelToName name)
+-- | Materialize a Value into a Operand
+_materializeValueToOperand ctx v =
+  case v of
+    ValueConstInt _ -> L.ConstantOperand $ _materializeValueToConstant ctx v
+    reference -> L.LocalReference (irToLLVMType (_constructValueType  ctx v)) (_getValueReferenceName $ v)
 
-_materializeValueToOperand ctx (ValueParamRef name) = let
-  ty = getParamTypeFromContext ctx name
-    in L.LocalReference (irToLLVMType ty) (labelToName name)
-
-_materializeValueToOperand ctx (ValueFnPointer fnname) = let
-  ty = (functionNameToType ctx) M.! fnname
-    in L.ConstantOperand $ LC.GlobalReference (irToLLVMType ty) (labelToName fnname)
-
-_materializeValueToOperand ctx  (ValueGlobalRef name) = let
-  ty = (globalNameToType ctx) M.! name
-    in L.ConstantOperand $ LC.GlobalReference (irToLLVMType ty) (labelToName name)
-
+-- | Materialize a Value to a Constant.
+-- | Note: this is partial.
 _materializeValueToConstant :: Context -> Value -> LC.Constant
 _materializeValueToConstant _ (ValueConstInt i) = LC.Int (intToWord 32) (intToInteger i)
 _materializeValueToConstant _ v = error . docToString $
@@ -233,7 +238,7 @@ _materializeFunction ctx f = L.GlobalDefinition (L.functionDefaults {
   -- False = vararg
 
   L.parameters=(_materializeFunctionParams f, False),
-  L.basicBlocks = mapToList (materializeBB fnctx) (functionBBMap f)
+  L.basicBlocks = [] -- mapToList (materializeBB fnctx) (functionBBMap f)
 }) where
     retty :: L.Type
     retty = irToLLVMType . snd . functionType $ f
@@ -256,7 +261,7 @@ _materializeGlobal ctx label GlobalValue{ gvType=ty, gvValue=mVal} =
 _irmoduleToDefinitions :: IR.Module -> [L.Definition]
 _irmoduleToDefinitions mod@Module {moduleFunctions=fs,
                             moduleGlobals=globalNameToVal} =
-    (map (_materializeFunction ctx)fs) ++ mapToList (_materializeGlobal ctx) globalNameToVal
+    (map (_materializeFunction ctx)fs) -- ++ mapToList (_materializeGlobal ctx) globalNameToVal
    where
     ctx = _buildContextForModule mod
 
@@ -266,9 +271,11 @@ moduleToLLVMIRString :: IR.Module -> IO IRString
 moduleToLLVMIRString irmod = let
   -- Module from llvm-hs-pure
   pureLLVMMod = _definitionsToModule . _irmoduleToDefinitions $ irmod
-  in RealL.withContext $ \llvmCtx ->
+  in trace
+  (show pureLLVMMod)
+  (RealL.withContext $ \llvmCtx ->
       RealL.withModuleFromAST llvmCtx pureLLVMMod $ \llvmMod ->
-        bsToStr <$> RealL.moduleLLVMAssembly llvmMod
+        bsToStr <$> RealL.moduleLLVMAssembly llvmMod)
 
 -- | Create a new module
 _definitionsToModule :: [L.Definition] ->  L.Module

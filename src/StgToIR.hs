@@ -29,7 +29,7 @@ irTypeEntryFn = IRTypeFunction [] IRTypeVoid
 -- | The type of a continuation given by alts
 -- | () -> void
 irTypeContinuation :: IRType
-irTypeContinuation = irTypeEntryFn
+irTypeContinuation = IRTypePointer irTypeEntryFn
 
 -- | The type of the ID of a heap object
 irTypeHeapObjId :: IRType
