@@ -163,6 +163,16 @@ irToLLVMType (IRTypeStruct fields) =
 
 -- | Convert a `RetInst` to a `Terminator`
 _materializeRetInst :: Context -> RetInst -> L.Terminator
+_materializeRetInst ctx RetInstVoid = L.Ret {
+  L.returnOperand=Nothing,
+  L.metadata'=[]
+}
+-- # hack
+_materializeRetInst ctx (RetInstSwitch switchVal defaultBB switchMaps) = L.Ret {
+  L.returnOperand=Nothing,
+  L.metadata'=[]
+}
+
 _materializeRetInst ctx r = error . docToString $
   pretty "unimplemented _materializeRetInst: " <+> pretty r
 
