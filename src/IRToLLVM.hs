@@ -9,6 +9,7 @@ import qualified LLVM.AST.Constant as LC
 -- | RealL = "real world", not haskell pure types
 import qualified LLVM.Module as RealL
 import qualified LLVM.Context as RealL
+import qualified LLVM.AST.CallingConvention as L
 
 -- | We need this because type' is both in LLVM.AST and LLVM.AST.Global
 import qualified LLVM.AST.Global
@@ -140,12 +141,16 @@ labelToName = strToName . unLabel
 intToInteger :: Int -> Integer
 intToInteger = fromIntegral
 
-intToWord :: Int -> W.Word32
+intToWord32 :: Int -> W.Word32
+intToWord32 = fromIntegral
+
+
+intToWord :: Int -> W.Word
 intToWord = fromIntegral
 
 -- | Convert a `IRType` to a LLVM Type.
 irToLLVMType :: IRType -> L.Type
-irToLLVMType (IRTypeInt i) = L.IntegerType . intToWord $ i
+irToLLVMType (IRTypeInt i) = L.IntegerType . intToWord32 $ i
 irToLLVMType (IRTypeVoid) = L.VoidType
 irToLLVMType (IRTypePointer ty) = L.ptr (irToLLVMType ty)
 irToLLVMType (IRTypeFunction params ret) =
@@ -158,7 +163,8 @@ irToLLVMType (IRTypeStruct fields) =
 
 -- | Convert a `RetInst` to a `Terminator`
 _materializeRetInst :: Context -> RetInst -> L.Terminator
-_materializeRetInst ctx r = error "unimplemented _materializeRetInst"
+_materializeRetInst ctx r = error . DocToString $
+  pretty "unimplemented _materializeRetInst: " <+> pretty r
 
 _constructValueType :: Context -> Value -> IRType
 _constructValueType ctx (ValueConstInt _) = irTypeInt32
@@ -185,10 +191,15 @@ _materializeValueToOperand ctx v =
 -- | Materialize a Value to a Constant.
 -- | Note: this is partial.
 _materializeValueToConstant :: Context -> Value -> LC.Constant
-_materializeValueToConstant _ (ValueConstInt i) = LC.Int (intToWord 32) (intToInteger i)
+_materializeValueToConstant _ (ValueConstInt i) = LC.Int (intToWord32 32) (intToInteger i)
 _materializeValueToConstant _ v = error . docToString $
   pretty "unable to materialize value to constant: " <+> pretty v
 
+-- | make an `Operand` into a `CallableOperand`
+_makeOperandCallable :: L.Operand -> L.CallableOperand
+_makeOperandCallable = Right
+
+-- | Materialize an IR instruction
 _materializeInst :: Context -> Inst -> L.Instruction
 _materializeInst ctx (InstAdd v1 v2) = L.Add {
   L.nsw=False,
@@ -197,6 +208,25 @@ _materializeInst ctx (InstAdd v1 v2) = L.Add {
   L.operand1=_materializeValueToOperand ctx v2,
   L.metadata=[]
 }
+
+
+_materializeInst ctx (InstCall fnname fnparams) = L.Call {
+  L.tailCallKind=Nothing,
+  L.callingConvention= L.C,
+  L.returnAttributes=[],
+  L.function=_makeOperandCallable $ _materializeValueToOperand ctx fnname,
+  L.arguments=args,
+  L.functionAttributes=[],
+  L.metadata=[]
+} where
+  paramAttribs :: [[L.ParameterAttribute]]
+  paramAttribs = repeat []
+
+  args :: [(L.Operand, [L.ParameterAttribute])]
+  args = zip (map (_materializeValueToOperand ctx) fnparams) paramAttribs
+
+_materializeInst ctx inst =  error . docToString $
+  pretty "unable to materialize Inst: " <+> pretty inst
 
 -- | Materialize a `Named a` by using `f` into a `L.Named b`
 -- | We choose to not create the more obvious version without the `a -> b`
@@ -238,7 +268,7 @@ _materializeFunction ctx f = L.GlobalDefinition (L.functionDefaults {
   -- False = vararg
 
   L.parameters=(_materializeFunctionParams f, False),
-  L.basicBlocks = [] -- mapToList (materializeBB fnctx) (functionBBMap f)
+  L.basicBlocks =  mapToList (materializeBB fnctx) (functionBBMap f)
 }) where
     retty :: L.Type
     retty = irToLLVMType . snd . functionType $ f
