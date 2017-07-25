@@ -89,10 +89,17 @@ constructInstType ctx _ inst = error . docToString $
 
 -- | Set the current function in the context
 setFunctionInContext ::  Function -> Context -> Context
-setFunctionInContext f ctx = ctx {
-  currentFunction=Just f,
-  instNameToType=instNameToType
-} where
+setFunctionInContext f ctx = newctx where
+    -- | NOTE: I am abusing laziness here to construct instNameToType.
+    newctx :: Context
+    newctx = ctx {
+      currentFunction=Just f,
+      instNameToType=trace (docToString $
+                             vcat [pretty "f:",
+                                  pretty f,
+                                  pretty "instNameToInst:",
+                                  pretty instNameToInst]) instNameToType
+    }
    -- | Basic blocks in the function.
     bbs :: [BasicBlock]
     bbs = M.elems . functionBBMap $ f
@@ -110,9 +117,9 @@ setFunctionInContext f ctx = ctx {
     instNameToInst :: M.OrderedMap (Label Inst) Inst
     instNameToInst = mconcat . map mkNamedInstMap $ namedInsts
 
-    -- | map instruction name to type
+    -- | map instruction name to type. We abuse laziness to use newctx
     instNameToType :: M.OrderedMap (Label Inst) IRType
-    instNameToType = fmap (constructInstType ctx instNameToInst) instNameToInst
+    instNameToType = fmap (constructInstType newctx instNameToInst) instNameToInst
 
 -- | Get the parameter type from the parameter name
 getParamTypeFromContext :: Context -> Label Param -> IRType
@@ -317,7 +324,7 @@ _materializeFunction ctx f = L.GlobalDefinition (L.functionDefaults {
   -- False = vararg
 
   L.parameters=(_materializeFunctionParams f, False),
-  L.basicBlocks =  mapToList (materializeBB fnctx) (functionBBMap f)
+  L.basicBlocks=mapToList (materializeBB fnctx) (functionBBMap f)
 }) where
     retty :: L.Type
     retty = irToLLVMType . snd . functionType $ f
