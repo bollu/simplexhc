@@ -25,6 +25,7 @@ import qualified Data.List as L
 data OrderedMap k v = OrderedMap { map' :: M.Map k v, order :: [k] } deriving(Show, Functor, Foldable, Traversable)
 
 instance (Ord k, Pretty k, Pretty v) => Pretty (OrderedMap k v) where
+  pretty (OrderedMap _ []) = pretty "empty map"
   pretty ok = vcat (map pkv (toList ok)) where
     pkv :: (Pretty k, Pretty v) => (k, v) -> Doc ann
     pkv (k, v) = pretty "** key: " <+> pretty k <+> pretty " | value : " <+> pretty v
@@ -82,7 +83,10 @@ ok ! k =
   case (OrderedMap.lookup k ok) of
            Just a -> a
            Nothing -> error . docToString $
-               vcat [pretty "key missing, has no value associated with it: " <+> pretty k, indent 4 (pretty ok)]
+               vcat [pretty "key missing, has no value associated with it: " <+> pretty k,
+                     pretty "map:",
+                     indent 4 (pretty ok),
+                     pretty "---"]
 
 foldMapWithKey :: Monoid m => (k -> a -> m) -> OrderedMap k a -> m
 foldMapWithKey f = liftMapExtract_ (M.foldMapWithKey f)
