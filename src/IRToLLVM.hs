@@ -163,7 +163,7 @@ irToLLVMType (IRTypeStruct fields) =
 
 -- | Convert a `RetInst` to a `Terminator`
 _materializeRetInst :: Context -> RetInst -> L.Terminator
-_materializeRetInst ctx r = error . DocToString $
+_materializeRetInst ctx r = error . docToString $
   pretty "unimplemented _materializeRetInst: " <+> pretty r
 
 _constructValueType :: Context -> Value -> IRType
