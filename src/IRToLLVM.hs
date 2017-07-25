@@ -81,7 +81,10 @@ constructInstType ctx _ call@(InstCall fn _) =
   case _constructValueType ctx fn of
     IRTypeFunction _ retty -> retty
     otherty -> error . docToString $
-      pretty "unabke to construct type for function call: " <+> pretty call
+      pretty "unable to construct type for function call: " <+> pretty call
+
+constructInstType ctx _ inst = error . docToString $
+  pretty "unimplemented constructInstType for: " <+> pretty inst
 
 
 -- | Set the current function in the context
