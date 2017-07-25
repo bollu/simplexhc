@@ -196,8 +196,11 @@ _createStackPopFn fnname elemty nG stackGP = do
 -- LLVM Module for our program.
 createContext :: [Binding] -> [ConstructorName] -> State ModuleBuilder Context
 createContext bs cnames = do
+  -- TODO: I need to decide how to type globals: whether the fact that are
+  -- pointers is encoded by the _user_, or is implicit
+  -- is @g :: int, a int*, or an int where I infer the *?
   contstack <- createGlobalVariable "stackcont" (IRTypePointer irTypeContinuation)
-  contn <- createGlobalVariable "contn" (IRTypeInt 32)
+  contn <- createGlobalVariable "contn" (IRTypePointer (IRTypeInt 32))
   bfns <- for bs buildFnStubForBind
 
   rtag <- createGlobalVariable "rtag" irTypeConstructorTag

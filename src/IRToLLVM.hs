@@ -219,6 +219,32 @@ _materializeInst ctx (InstAdd v1 v2) = L.Add {
   L.metadata=[]
 }
 
+_materializeInst ctx (InstLoad addr) = L.Load {
+  L.volatile=False,
+  L.address=_materializeValueToOperand ctx addr,
+  L.maybeAtomicity=Nothing,
+  L.alignment=intToWord32 4,
+  L.metadata=[]
+}
+
+_materializeInst ctx (InstStore addr val) = L.Store {
+  L.volatile=False,
+  L.address=_materializeValueToOperand ctx addr,
+  L.value=_materializeValueToOperand ctx val,
+  L.maybeAtomicity=Nothing,
+  L.alignment=intToWord32 4,
+  L.metadata=[]
+}
+
+
+_materializeInst ctx (InstGEP addr indices) = L.GetElementPtr {
+  L.inBounds=True,
+  L.address=_materializeValueToOperand ctx addr,
+  L.indices=map (_materializeValueToOperand ctx) indices,
+  L.metadata=[]
+}
+
+
 
 _materializeInst ctx (InstCall fnname fnparams) = L.Call {
   L.tailCallKind=Nothing,
