@@ -11,7 +11,7 @@ import qualified Text.PrettyPrint.ANSI.Leijen as PP
 type ErrorString = String
 
 squashFrontendErrors :: Either ErrorString (Either StgError a) -> Either ErrorString a
-squashFrontendErrors val = 
+squashFrontendErrors val =
     case val of
       (Left parseErr) -> Left $ "pre-compile error:\n" ++ parseErr
       (Right (Left compileErr)) -> Left $ "compile error:\n" ++ show compileErr

@@ -155,18 +155,17 @@ _createStackPushFn :: String  -- ^function name
 _createStackPushFn fnname elemty nG stackGP = do
   lbl <- createFunction [elemty] IRTypeVoid fnname
   runFunctionBuilder lbl $ do
-      {-
-      n <- "n" =:= InstLoad nG
+      n <- "nooo" =:= InstLoad nG
       -- Load the pointer
-      stackP <- "stackp" =:= InstLoad stackGP
+      --  stackP <- "stackp" =:= InstLoad stackGP
       -- compute store addr
-      storeaddr <- "storeaddr" =:= InstGEP stackP [n]
-      val <- getParamValue 0
-      appendInst $ InstStore storeaddr val
+      -- storeaddr <- "storeaddr" =:= InstGEP stackP [n]
+      -- val <- getParamValue 0
+      -- appendInst $ InstStore storeaddr val
       -- TODO: this should be (n + 1)
+      -- | Understand why this fails..?
       ninc <- "ninc" =:= InstAdd n (ValueConstInt 1)
       appendInst $ InstStore nG ninc
-      -}
       return ()
   return lbl
 
@@ -200,17 +199,15 @@ _createStackPopFn fnname elemty nG stackGP = do
 -- LLVM Module for our program.
 createContext :: [Binding] -> [ConstructorName] -> State ModuleBuilder Context
 createContext bs cnames = do
-  -- TODO: I need to decide how to type globals: whether the fact that are
-  -- pointers is encoded by the _user_, or is implicit
-  -- is @g :: int, a int*, or an int where I infer the *?
-  contstack <- createGlobalVariable "stackcont" (IRTypePointer irTypeContinuation)
-  contn <- createGlobalVariable "contn" (IRTypePointer (IRTypeInt 32))
+  -- NOTE: the pointer in the global is implicit, in the sense of GEP
+  contstack <- createGlobalVariable "stackcont" (irTypeContinuation)
+  contn <- createGlobalVariable "contn" irTypeInt32
   bfns <- for bs buildFnStubForBind
 
-  rtag <- createGlobalVariable "rtag" irTypeConstructorTag
+  rtag <- createGlobalVariable "rtag" (IRTypePointer irTypeConstructorTag)
 
   let matcherretty = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
-  fnmatcher <- createFunction [] matcherretty "matcher"
+  fnmatcher <- createFunction [irTypeConstructorTag] matcherretty "matcher"
 
   let bdatas = [BindingData {
                   bindingId=bid,
@@ -311,8 +308,8 @@ codegenExprNode ctx nametoval (ExprNodeFnApplication fnname atoms) = do
   fn <- case fnname `M.lookup` nametoval of
           Just fn_ -> return $ fn_
           Nothing -> -- actually we should check globals, but fuck it for now
-                     -- "fn" =:= createMatcherCallWithName ctx fnname
-                     error "unimplemented, what should I do in this context?"
+                     "fn" =:= createMatcherCallWithName ctx fnname
+                     -- error "unimplemented, what should I do in this context?"
   for atoms (pushAtomToStack ctx nametoval)
   appendInst $ InstCall fn []
 
@@ -323,10 +320,6 @@ codegenExprNode ctx nametoval (ExprNodeConstructor (Constructor name atoms)) = d
   jumpfn <- "jumpfn" =:= popCont ctx
   for atoms (pushAtomToStack ctx nametoval)
   appendInst $ InstCall jumpfn []
-  return ()
-
--- | Int codegen (hack)
-codegenExprNode _ nametoval  (ExprNodeInt i) = do
   return ()
 
 
@@ -361,8 +354,10 @@ programToModule p = runModuleBuilder $ do
     let cs = getConstructorNamesInProgram p
     ctx <- createContext bs cs
     createMatcher ctx
+    {-
     for_ (M.toList . bindingNameToData $ ctx)
           (\(bname, bdata) -> runFunctionBuilder
                                   (bindingFn bdata)
                                   (setupTopLevelBinding ctx bname))
+    -}
     return ()

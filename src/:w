@@ -184,15 +184,10 @@ _materializeRetInst ctx (RetInstReturn val) = L.Ret {
   L.metadata'=[]
 }
 -- # hack
-_materializeRetInst ctx (RetInstSwitch switchVal defaultBB switchMaps) = L.Switch {
-  L.operand0'=_materializeValueToOperand ctx switchVal,
-  L.defaultDest=labelToName defaultBB,
-  L.dests=map switchToLLVM switchMaps,
+_materializeRetInst ctx (RetInstSwitch switchVal defaultBB switchMaps) = L.Ret {
+  L.returnOperand=Nothing,
   L.metadata'=[]
-} where
-  switchToLLVM :: (Value, BBLabel) -> (LC.Constant, L.Name)
-  switchToLLVM (val, bbname) =
-    (_materializeValueToConstant ctx val, labelToName bbname)
+}
 
 _materializeRetInst ctx r = error . docToString $
   pretty "unimplemented _materializeRetInst: " <+> pretty r

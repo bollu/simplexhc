@@ -13,7 +13,7 @@ data IRType = IRTypeInt Int | -- ^ number of bits
               IRTypeVoid |
               IRTypePointer IRType |
               IRTypeFunction [IRType] IRType |
-              IRTypeStruct [IRType]
+              IRTypeStruct [IRType] deriving(Eq)
 
 -- | The type of something that points to a block of memory from, say, malloc.
 -- | consider this as void*.
@@ -58,9 +58,9 @@ instance Pretty Value where
   pretty (ValueConstInt i) = pretty i <> pretty "#"
   pretty (ValueInstRef name) = pretty "%" <> pretty name
   pretty (ValueParamRef name) = pretty "%param." <> pretty name
-  pretty (ValueFnPointer name) = pretty "%fnptr." <> pretty name
+  pretty (ValueFnPointer name) = pretty "@fnptr." <> pretty name
   pretty (ValueGlobalRef name) = pretty "@" <> pretty name
-  pretty (ValueSizeOf name) = pretty "@" <> pretty name
+  pretty (ValueSizeOf name) = pretty "sizeof" <> pretty name
 
 -- | Instructions that we allow within a basic block.
 data Inst where

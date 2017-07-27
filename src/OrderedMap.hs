@@ -62,10 +62,10 @@ size :: OrderedMap k a -> Int
 size = liftMapExtract_ M.size
 
 keys :: OrderedMap k a -> [k]
-keys (OrderedMap{order=order}) = order
+keys  = liftMapExtract_ M.keys
 
 elems :: Ord k => OrderedMap k a -> [a]
-elems (OrderedMap{order=order, map'=map'}) = map (map' M.!) order
+elems = liftMapExtract_ M.elems
 
 union :: (Eq k, Ord k) => OrderedMap k a -> OrderedMap k a -> OrderedMap k a
 union (OrderedMap{order=o1, map'=m1}) (OrderedMap{order=o2, map'=m2}) =
