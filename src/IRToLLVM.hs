@@ -347,7 +347,7 @@ _materializeGlobal ctx label GlobalValue{ gvType=ty, gvValue=mVal} =
 _irmoduleToDefinitions :: IR.Module -> [L.Definition]
 _irmoduleToDefinitions mod@Module {moduleFunctions=fs,
                             moduleGlobals=globalNameToVal} =
-    (map (_materializeFunction ctx)fs) -- ++ mapToList (_materializeGlobal ctx) globalNameToVal
+    (map (_materializeFunction ctx)fs) ++ mapToList (_materializeGlobal ctx) globalNameToVal
    where
     ctx = _buildContextForModule mod
 

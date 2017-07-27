@@ -155,6 +155,7 @@ _createStackPushFn :: String  -- ^function name
 _createStackPushFn fnname elemty nG stackGP = do
   lbl <- createFunction [elemty] IRTypeVoid fnname
   runFunctionBuilder lbl $ do
+      {-
       n <- "n" =:= InstLoad nG
       -- Load the pointer
       stackP <- "stackp" =:= InstLoad stackGP
@@ -165,6 +166,7 @@ _createStackPushFn fnname elemty nG stackGP = do
       -- TODO: this should be (n + 1)
       ninc <- "ninc" =:= InstAdd n (ValueConstInt 1)
       appendInst $ InstStore nG ninc
+      -}
       return ()
   return lbl
 
@@ -178,6 +180,7 @@ _createStackPopFn :: String -- ^Function name
 _createStackPopFn fnname elemty nG stackGP = do
   lbl <- createFunction [] elemty  fnname
   runFunctionBuilder lbl $ do
+      {-
       n <- "n" =:= InstLoad nG
       -- Load the pointer
       stackP <- "stackp" =:= InstLoad stackGP
@@ -188,6 +191,7 @@ _createStackPopFn fnname elemty nG stackGP = do
       n' <- "ndec" =:= InstAdd n (ValueConstInt (-1))
       appendInst $ InstStore nG n'
       setRetInst $  RetInstReturn loadval
+      -}
       return ()
   return lbl
 
@@ -275,6 +279,8 @@ createMatcher ctx = do
     buildMatcherFn_ :: M.OrderedMap VarName BindingData ->
                        State FunctionBuilder ()
     buildMatcherFn_ bdata = do
+      return ()
+      {-
       entrybb <- getEntryBBLabel
       let bnames = M.keys bdata
       switchValAndBBs <- for bnames (buildMatchBBForBind_ bdata)
@@ -282,6 +288,7 @@ createMatcher ctx = do
       errBB <- createBB "switch.fail"
       focusBB entrybb
       setRetInst (RetInstSwitch param errBB  switchValAndBBs)
+      -}
 
 -- | Create a call to the matcher to return the function with name VarName
 createMatcherCallWithName :: Context -> VarName -> Inst
@@ -320,6 +327,10 @@ codegenExprNode ctx nametoval (ExprNodeConstructor (Constructor name atoms)) = d
   jumpfn <- "jumpfn" =:= popCont ctx
   for atoms (pushAtomToStack ctx nametoval)
   appendInst $ InstCall jumpfn []
+  return ()
+
+-- | Int codegen (hack)
+codegenExprNode _ nametoval  (ExprNodeInt i) = do
   return ()
 
 
