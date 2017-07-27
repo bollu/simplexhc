@@ -258,7 +258,7 @@ popCont ctx =
 
 createMatcher :: Context -> State ModuleBuilder ()
 createMatcher ctx = do
-    runFunctionBuilder (fnmatcher ctx) (buildMatcherFn_ (bindingNameToData ctx))
+    runFunctionBuilder (fnmatcher ctx) (_createMatcherFn (bindingNameToData ctx))
     where
     -- | Build a BB of the matcher that mathes with the ID and returns the
     -- actual function.
@@ -270,17 +270,14 @@ createMatcher ctx = do
       focusBB bbid
       let bfn = (bdata M.! bname) & bindingFn :: Value
       let bid = (bdata M.! bname) & bindingId :: BindingId
+      setRetInst (RetInstReturn bfn)
+      return ((ValueConstInt bid), bbid)
 
-      -- setRetInst (RetInstReturn (ValueFnPointer bfn))
-      return ((ValueConstInt 3), bbid)
-      -- return ((ValueConstInt bid), bbid)
     -- | Build the matcher function, that takes a function ID and returns the
     -- function corresponding to the ID.
-    buildMatcherFn_ :: M.OrderedMap VarName BindingData ->
+    _createMatcherFn :: M.OrderedMap VarName BindingData ->
                        State FunctionBuilder ()
-    buildMatcherFn_ bdata = do
-      return ()
-      {-
+    _createMatcherFn bdata = do
       entrybb <- getEntryBBLabel
       let bnames = M.keys bdata
       switchValAndBBs <- for bnames (buildMatchBBForBind_ bdata)
@@ -288,7 +285,6 @@ createMatcher ctx = do
       errBB <- createBB "switch.fail"
       focusBB entrybb
       setRetInst (RetInstSwitch param errBB  switchValAndBBs)
-      -}
 
 -- | Create a call to the matcher to return the function with name VarName
 createMatcherCallWithName :: Context -> VarName -> Inst

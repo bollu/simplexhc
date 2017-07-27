@@ -212,10 +212,33 @@ _getValueReferenceName (ValueGlobalRef name) = (labelToName name)
 _getValueReferenceName v = error . docToString $
   pretty "value is not a reference:" <+> pretty v
 
+-- | Materialize a value into a local reference.
+-- | Used only by _materializeValueToOperand.
+-- | TODO: refactor to let-binding
+_materializeValueToLocalReference :: Context -> Value -> L.Operand
+_materializeValueToLocalReference ctx v =
+  L.LocalReference (irToLLVMType (_constructValueType  ctx v))
+                   (_getValueReferenceName $ v)
+
+-- | Materialize a value into a global reference.
+-- | Used only by _materializeValueToOperand.
+-- | TODO: refactor to let-binding
+_materializeValueToGlobalReference :: Context -> Value -> L.Operand
+_materializeValueToGlobalReference ctx v =
+  L.ConstantOperand $ LC.GlobalReference
+                         (irToLLVMType (_constructValueType  ctx v))
+                         (_getValueReferenceName $ v)
+
 -- | Materialize a Value into a Operand
+_materializeValueToOperand :: Context -> Value -> L.Operand
 _materializeValueToOperand ctx v =
   case v of
     ValueConstInt _ -> L.ConstantOperand $ _materializeValueToConstant ctx v
+    ref@(ValueInstRef _) -> _materializeValueToLocalReference ctx ref
+    ref@(ValueParamRef _) -> _materializeValueToLocalReference ctx ref
+    fnref@(ValueFnPointer _) -> _materializeValueToGlobalReference ctx fnref
+    gref@(ValueGlobalRef _) -> _materializeValueToGlobalReference ctx gref
+
     reference -> L.LocalReference (irToLLVMType (_constructValueType  ctx v)) (_getValueReferenceName $ v)
 
 -- | Materialize a Value to a Constant.
