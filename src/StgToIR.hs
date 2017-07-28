@@ -129,7 +129,7 @@ buildFnStubForBind :: Binding -> State ModuleBuilder Value
 buildFnStubForBind Binding{..} = let
     paramsty = []
     retty = IRTypeVoid
-    fnname = ("bind." ++ (_unVarName _bindingName))
+    fnname = (_unVarName _bindingName)
   in
     createFunction paramsty retty fnname
 
@@ -179,18 +179,15 @@ _createStackPopFn :: String -- ^Function name
 _createStackPopFn fnname elemty nG stackGP = do
   lbl <- createFunction [] elemty  fnname
   runFunctionBuilder lbl $ do
-      {-
       n <- "n" =:= InstLoad nG
       -- Load the pointer
       stackP <- "stackp" =:= InstLoad stackGP
       -- compute store addr
       loadaddr <- "loadaddr" =:= InstGEP stackP [n]
       loadval <-  "loadval" =:= InstLoad loadaddr
-
       n' <- "ndec" =:= InstAdd n (ValueConstInt (-1))
       appendInst $ InstStore nG n'
       setRetInst $  RetInstReturn loadval
-      -}
       return ()
   return lbl
 
@@ -200,7 +197,7 @@ _createStackPopFn fnname elemty nG stackGP = do
 createContext :: [Binding] -> [ConstructorName] -> State ModuleBuilder Context
 createContext bs cnames = do
   -- NOTE: the pointer in the global is implicit, in the sense of GEP
-  contstack <- createGlobalVariable "stackcont" (irTypeContinuation)
+  contstack <- createGlobalVariable "stackcont" (IRTypePointer irTypeContinuation)
   contn <- createGlobalVariable "contn" irTypeInt32
   bfns <- for bs buildFnStubForBind
 
@@ -250,8 +247,9 @@ pushCont ctx val = do
 -- Used by alts.
 -- Note that return value needs to be named with (=:=)
 popCont :: Context -> Inst
-popCont ctx =
-  let f = fnpushcont ctx in InstCall f []
+popCont ctx = InstCall (fnpopcont ctx) []
+
+
 
 createMatcher :: Context -> State ModuleBuilder ()
 createMatcher ctx = do
@@ -307,20 +305,20 @@ codegenExprNode :: Context
 codegenExprNode ctx nametoval (ExprNodeFnApplication fnname atoms) = do
   fn <- case fnname `M.lookup` nametoval of
           Just fn_ -> return $ fn_
-          Nothing -> -- actually we should check globals, but fuck it for now
-                     "fn" =:= createMatcherCallWithName ctx fnname
-                     -- error "unimplemented, what should I do in this context?"
+          Nothing -> "fn" =:= createMatcherCallWithName ctx fnname
   for atoms (pushAtomToStack ctx nametoval)
   appendInst $ InstCall fn []
 
   return ()
 
 -- | Constructor codegen
+{-
 codegenExprNode ctx nametoval (ExprNodeConstructor (Constructor name atoms)) = do
   jumpfn <- "jumpfn" =:= popCont ctx
   for atoms (pushAtomToStack ctx nametoval)
   appendInst $ InstCall jumpfn []
   return ()
+-}
 
 
 codegenExprNode _ nametoval  e = error . docToString $
@@ -354,10 +352,8 @@ programToModule p = runModuleBuilder $ do
     let cs = getConstructorNamesInProgram p
     ctx <- createContext bs cs
     createMatcher ctx
-    {-
     for_ (M.toList . bindingNameToData $ ctx)
           (\(bname, bdata) -> runFunctionBuilder
                                   (bindingFn bdata)
                                   (setupTopLevelBinding ctx bname))
-    -}
     return ()

@@ -86,15 +86,10 @@ constructInstType ctx _ inst = error . docToString $
 -- | Set the current function in the context
 setFunctionInContext ::  Function -> Context -> Context
 setFunctionInContext f ctx = newctx where
-    -- | NOTE: I am abusing laziness here to construct instNameToType.
     newctx :: Context
     newctx = ctx {
       currentFunction=Just f,
-      instNameToType=trace (docToString $
-                             vcat [pretty "f:",
-                                  pretty f,
-                                  pretty "instNameToInst:",
-                                  pretty instNameToInst]) instNameToType
+      instNameToType=instNameToType
     }
    -- | Basic blocks in the function.
     bbs :: [BasicBlock]
@@ -271,25 +266,16 @@ _materializeInst ctx (InstLoad addr) = L.Load {
   L.metadata=[]
 }
 
-_materializeInst ctx s@(InstStore addr val) = trace dbgstr (L.Store {
+_materializeInst ctx s@(InstStore addr val) = L.Store {
   L.volatile=False,
   L.address=addrop,
   L.value=valop,
   L.maybeAtomicity=Nothing,
   L.alignment=intToWord32 4,
   L.metadata=[]
-}) where
+} where
     valop =_materializeValueToOperand ctx val
     addrop=_materializeValueToOperand ctx addr
-
-    dbgstr = docToString $ vcat [pretty "##storeInst: " <+> pretty s,
-                                 pretty "val:" <+> pretty val,
-                                 indent 4 $ (pretty . show  $ valop),
-                                 indent 4 $ (pretty  $ _constructValueType ctx val),
-                                 pretty "addr:" <+> pretty addr,
-                                 indent 4 $ (pretty . show  $ addrop),
-                                 indent 4 $ (pretty  $ _constructValueType ctx addr)]
-
 
 _materializeInst ctx (InstGEP addr indices) = L.GetElementPtr {
   L.inBounds=True,
