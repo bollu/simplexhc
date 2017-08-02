@@ -44,8 +44,13 @@ instance Pretty (Label a) where
   pretty (Label s) = pretty s
 
 -- a Value which can be passed as an operand to an instruction
-data Value = ValueConstInt Int | ValueInstRef (Label Inst) | ValueParamRef (Label Param) | ValueFnPointer (Label Function) |
-             ValueGlobalRef (Label GlobalValue) | ValueSizeOf(IRType)
+data Value = ValueConstInt Int
+            | ValueInstRef (Label Inst)
+            | ValueParamRef (Label Param)
+            | ValueFnPointer (Label Function)
+            | ValueGlobalRef (Label GlobalValue)
+            | ValueSizeOf(IRType)
+            | ValueUndef (IRType) -- ^An undef value of any chosen type
 
 -- a GlobalValue, that is a value of a global variable.
 data GlobalValue = GlobalValue { gvType :: IRType, gvValue :: Maybe Value }
@@ -61,6 +66,7 @@ instance Pretty Value where
   pretty (ValueFnPointer name) = pretty "@fnptr." <> pretty name
   pretty (ValueGlobalRef name) = pretty "@" <> pretty name
   pretty (ValueSizeOf name) = pretty "sizeof" <> pretty name
+  pretty (ValueUndef ty) = parens $ pretty "undef:" <> pretty ty
 
 -- | Instructions that we allow within a basic block.
 data Inst where
@@ -95,7 +101,7 @@ instance Pretty Inst where
   pretty (InstLoad op) = pretty "load" <+> pretty op
   pretty (InstGEP base offsets) =
     pretty "gep" <+>
-    braces(pretty "base:" <+> pretty base) <+>
+    parens(pretty "base:" <+> pretty base) <+>
     hcat (map (brackets . pretty) offsets)
 
   pretty (InstStore slot val) = pretty "store" <+> pretty val <+>
@@ -106,7 +112,7 @@ instance Pretty Inst where
 
   pretty (InstCall fn params) =
     pretty "call" <+> pretty fn <+>
-      braces (hcat (punctuate comma (map pretty params)))
+      parens (hcat (punctuate comma (map pretty params)))
 
   pretty (InstMalloc mem) =
     pretty "malloc" <+> pretty mem

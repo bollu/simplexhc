@@ -206,7 +206,7 @@ _getValueReferenceName (ValueParamRef name) = (labelToName name)
 _getValueReferenceName (ValueFnPointer fnname) = (labelToName fnname)
 _getValueReferenceName (ValueGlobalRef name) = (labelToName name)
 _getValueReferenceName v = error . docToString $
-  pretty "value is not a reference:" <+> pretty v
+  pretty "Either _materializeValueToConstant was not implemented, or value is not a reference:" <+> pretty v
 
 -- | Materialize a value into a local reference.
 -- | Used only by _materializeValueToOperand.
@@ -218,7 +218,6 @@ _materializeValueToLocalReference ctx v =
 
 -- | Materialize a value into a global reference.
 -- | Used only by _materializeValueToOperand.
--- | TODO: refactor to let-binding
 _materializeValueToGlobalReference :: Context -> Value -> L.Operand
 _materializeValueToGlobalReference ctx v =
   L.ConstantOperand $ LC.GlobalReference
@@ -230,6 +229,7 @@ _materializeValueToOperand :: Context -> Value -> L.Operand
 _materializeValueToOperand ctx v =
   case v of
     ValueConstInt _ -> L.ConstantOperand $ _materializeValueToConstant ctx v
+    ValueUndef ty -> L.ConstantOperand $ _materializeValueToConstant ctx v
     ref@(ValueInstRef _) -> _materializeValueToLocalReference ctx ref
     ref@(ValueParamRef _) -> _materializeValueToLocalReference ctx ref
     fnref@(ValueFnPointer _) -> _materializeValueToGlobalReference ctx fnref
@@ -241,6 +241,7 @@ _materializeValueToOperand ctx v =
 -- | Note: this is partial.
 _materializeValueToConstant :: Context -> Value -> LC.Constant
 _materializeValueToConstant _ (ValueConstInt i) = LC.Int (intToWord32 32) (intToInteger i)
+_materializeValueToConstant _ (ValueUndef ty) = LC.Undef (irToLLVMType ty)
 _materializeValueToConstant _ v = error . docToString $
   pretty "unable to materialize value to constant: " <+> pretty v
 

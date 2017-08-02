@@ -108,7 +108,9 @@ data Context = Context {
     -- | function to push continuation value to stack
     fnpushcont :: Value,
     -- | function to pop continuation value on stack
-    fnpopcont :: Value
+    fnpopcont :: Value,
+    -- | function that traps
+    fntrap :: Value
 }
 
 
@@ -203,8 +205,9 @@ createContext bs cnames = do
 
   rtag <- createGlobalVariable "rtag" (IRTypePointer irTypeConstructorTag)
 
-  let matcherretty = IRTypePointer  (IRTypeFunction [] IRTypeVoid)
-  fnmatcher <- createFunction [irTypeConstructorTag] matcherretty "matcher"
+  fnmatcher <- createFunction [irTypeConstructorTag] irTypeContinuation "matcher"
+
+  trap <- createFunction [] IRTypeVoid "llvm.trap"
 
   let bdatas = [BindingData {
                   bindingId=bid,
@@ -233,7 +236,8 @@ createContext bs cnames = do
     constructorNameToData=M.fromList (zip cnames cdatas),
     fnmatcher=fnmatcher,
     fnpushcont=pushcont,
-    fnpopcont=popcont
+    fnpopcont=popcont,
+    fntrap=trap
  }
 
 -- | Push a continuation into the stack. Used by alts
@@ -277,9 +281,15 @@ createMatcher ctx = do
       let bnames = M.keys bdata
       switchValAndBBs <- for bnames (buildMatchBBForBind_ bdata)
       param <- getParamValue 0
+      -- create error block
       errBB <- createBB "switch.fail"
+      focusBB errBB
+      setRetInst (RetInstReturn (ValueUndef (irTypeContinuation)))
+
+      -- create entry block
       focusBB entrybb
       setRetInst (RetInstSwitch param errBB  switchValAndBBs)
+
 
 -- | Create a call to the matcher to return the function with name VarName
 createMatcherCallWithName :: Context -> VarName -> Inst
@@ -357,3 +367,4 @@ programToModule p = runModuleBuilder $ do
                                   (bindingFn bdata)
                                   (setupTopLevelBinding ctx bname))
     return ()
+
