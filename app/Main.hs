@@ -22,6 +22,8 @@ import Data.List
 import Data.Monoid
 import ColorUtils
 
+import Data.Foldable(for_)
+
 
 import IR
 import IRBuilder
@@ -29,18 +31,28 @@ import IRBuilder
 import Options.Applicative
 
 data CommandLineOptions = CommandLineOptions {
+  -- | whether this should emit LLVM or not.
   emitLLVM :: Bool,
-  filepath :: String
+  -- | path to input file with STG.
+  infilepath :: String,
+  -- | path to output file to write LLVM IR.
+  moutfilepath :: Maybe String
 }
 
-filepathOpt :: Parser (String)
-filepathOpt = strOption (long "file" <> short 'f' <> metavar "FILEPATH")
+infilepathopt :: Parser (String)
+infilepathopt = strOption (long "input file" <> short 'f' <> metavar "infilepath")
+
+outfilepathopt :: Parser (Maybe String)
+outfilepathopt = option (Just <$> str) (long "output file" <>
+                                      short 'o' <>
+                                      metavar "outfilepath" <>
+                                      value Nothing)
 
 emitLLVMOpt :: Parser Bool
 emitLLVMOpt = switch (long "emit-llvm")
 
 commandLineOptionsParser :: Parser CommandLineOptions
-commandLineOptionsParser = CommandLineOptions <$> emitLLVMOpt <*> filepathOpt
+commandLineOptionsParser = CommandLineOptions <$> emitLLVMOpt <*> infilepathopt <*> outfilepathopt
 
 commandLineOptionsParserInfo :: ParserInfo CommandLineOptions
 commandLineOptionsParserInfo = info commandLineOptionsParser infomod where
@@ -77,8 +89,8 @@ getTraceString (trace, mErr) =
   machineFinalStateLogStr = if length trace == 0 then "" else "\nlog:\n====\n" ++ show ((last trace) ^. currentLog)
 
 runFileInterp :: String -> IO ()
-runFileInterp fpath = do
-    raw <- Prelude.readFile fpath
+runFileInterp ipath = do
+    raw <- Prelude.readFile ipath
     let mInitState = tryCompileString raw
     let trace = fmap genMachineTrace mInitState
     case trace of
@@ -87,9 +99,11 @@ runFileInterp fpath = do
                                       putStrLn  $ compileErr
           (Right trace) -> putStr . getTraceString $ trace
 
-runFileLLVM :: String -> IO ()
-runFileLLVM fpath = do
-    raw <- Prelude.readFile fpath
+runFileLLVM :: String -- ^Input file path
+               -> Maybe String -- ^Output file path
+               -> IO ()
+runFileLLVM ipath mopath = do
+    raw <- Prelude.readFile ipath
     let mParse = parseString raw
     case mParse of
         (Left compileErr) -> do
@@ -103,11 +117,13 @@ runFileLLVM fpath = do
                              putStrLn "*** LLVM IR :"
                              str <- moduleToLLVMIRString module'
                              putStr  str
+                             for_ mopath (\opath -> writeModuleLLVMIRStringToFile module' opath)
+-- Input
 main :: IO ()
 main = do
     opts <- execParser commandLineOptionsParserInfo
-    if filepath opts == ""
+    if infilepath opts == ""
         then runInputT defaultSettings repl
         else if emitLLVM opts == False
-        then runFileInterp (filepath opts)
-        else runFileLLVM (filepath opts)
+        then runFileInterp (infilepath opts)
+        else runFileLLVM (infilepath opts) (moutfilepath opts)

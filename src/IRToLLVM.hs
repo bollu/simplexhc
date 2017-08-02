@@ -374,6 +374,7 @@ _irmoduleToDefinitions mod@Module {moduleFunctions=fs,
 
 
 type IRString = String
+-- | Return the LLVM IR string corresponding to the IR.Module
 moduleToLLVMIRString :: IR.Module -> IO IRString
 moduleToLLVMIRString irmod = let
   -- Module from llvm-hs-pure
@@ -381,6 +382,16 @@ moduleToLLVMIRString irmod = let
   in RealL.withContext $ \llvmCtx ->
       RealL.withModuleFromAST llvmCtx pureLLVMMod $ \llvmMod ->
        bsToStr <$> RealL.moduleLLVMAssembly llvmMod
+
+-- | Write the LLVM IR corresponding to the IR.Module in the file
+writeModuleLLVMIRStringToFile :: IR.Module -- | Source module
+                                 -> String -- ^File path
+                                 -> IO ()
+writeModuleLLVMIRStringToFile irmod path = let
+  pureLLVMMod = _definitionsToModule . _irmoduleToDefinitions $ irmod
+  in RealL.withContext $ \llvmCtx ->
+      RealL.withModuleFromAST llvmCtx pureLLVMMod $ \llvmMod ->
+       RealL.writeLLVMAssemblyToFile (RealL.File path) llvmMod
 
 -- | Create a new module
 _definitionsToModule :: [L.Definition] ->  L.Module
