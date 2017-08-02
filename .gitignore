@@ -21,4 +21,4 @@ cabal.project.local
 
 *swp
 .*.swp
-
+tags*
