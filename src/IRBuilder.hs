@@ -8,7 +8,6 @@ module IRBuilder(
   focusBB,
   createBB,
   getTempInstName_,
-  -- getTempRetInstName_,
   appendInst,
   (=:=),
   setRetInst, getParamValue,
