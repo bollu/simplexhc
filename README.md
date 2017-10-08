@@ -1,5 +1,7 @@
 # Simplexhc
 
+## Note: this codebase is now being developed in C++: [simplexhc-cpp](https://github.com/bollu/simplexhc-cpp).
+
 This is supposed to be a simple compiler for a lazy functional programming language
 like haskell Core (hence "hc" = "haskell compiler"). `simplex` so it is vaguely related to polyhedral compilation.
 
